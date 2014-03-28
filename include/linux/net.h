@@ -118,6 +118,7 @@ enum sock_shutdown_cmd {
 };
 
 struct socket_wq {
+	/* Note: wait MUST be first field of socket_wq */
 	wait_queue_head_t	wait;
 	struct fasync_struct	*fasync_list;
 	struct rcu_head		rcu;
@@ -142,7 +143,7 @@ struct socket {
 
 	unsigned long		flags;
 
-	struct socket_wq	*wq;
+	struct socket_wq __rcu	*wq;
 
 	struct file		*file;
 	struct sock		*sk;
@@ -229,6 +230,8 @@ enum {
 extern int	     sock_wake_async(struct socket *sk, int how, int band);
 extern int	     sock_register(const struct net_proto_family *fam);
 extern void	     sock_unregister(int family);
+extern int	     __sock_create(struct net *net, int family, int type, int proto,
+				 struct socket **res, int kern);
 extern int	     sock_create(int family, int type, int proto,
 				 struct socket **res);
 extern int	     sock_create_kern(int family, int type, int proto,

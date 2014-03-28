@@ -13,9 +13,6 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
-/* DO NOT EDIT!! - this file automatically generated
- *                 from .s file by awk -f s2h.awk
- */
 /*  Size definitions
  *  Copyright (C) ARM Limited 1998. All rights reserved.
  */
@@ -24,7 +21,14 @@
 #define __sizes_h                       1
 
 /* handy sizes */
+#define SZ_1				0x00000001
+#define SZ_2				0x00000002
+#define SZ_4				0x00000004
+#define SZ_8				0x00000008
 #define SZ_16				0x00000010
+#define SZ_32				0x00000020
+#define SZ_64				0x00000040
+#define SZ_128				0x00000080
 #define SZ_256				0x00000100
 #define SZ_512				0x00000200
 
@@ -48,6 +52,7 @@
 #define SZ_48M                          0x03000000
 #define SZ_64M                          0x04000000
 #define SZ_128M                         0x08000000
+#define SZ_160M                         (SZ_128M | SZ_32M)
 #define SZ_256M                         0x10000000
 #define SZ_512M                         0x20000000
 

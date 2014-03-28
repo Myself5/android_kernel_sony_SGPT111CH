@@ -1,6 +1,6 @@
-/* 2011-06-10: File added by Sony Corporation */
+/* 2012-07-20: File added by Sony Corporation */
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.

@@ -21,6 +21,7 @@
 #include <net/dsa.h>
 #include <asm/page.h>
 #include <asm/timex.h>
+#include <asm/kexec.h>
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
 #include <mach/kirkwood.h>
@@ -846,18 +847,22 @@ static void __init kirkwood_wdt_init(void)
 /*****************************************************************************
  * Time handling
  ****************************************************************************/
+void __init kirkwood_init_early(void)
+{
+	orion_time_set_base(TIMER_VIRT_BASE);
+}
+
 int kirkwood_tclk;
 
-int __init kirkwood_find_tclk(void)
+static int __init kirkwood_find_tclk(void)
 {
 	u32 dev, rev;
 
 	kirkwood_pcie_id(&dev, &rev);
 
-	if ((dev == MV88F6281_DEV_ID && (rev == MV88F6281_REV_A0 ||
-					rev == MV88F6281_REV_A1)) ||
-	    (dev == MV88F6282_DEV_ID))
-		return 200000000;
+	if (dev == MV88F6281_DEV_ID || dev == MV88F6282_DEV_ID)
+		if (((readl(SAMPLE_AT_RESET) >> 21) & 1) == 0)
+			return 200000000;
 
 	return 166666667;
 }
@@ -865,7 +870,9 @@ int __init kirkwood_find_tclk(void)
 static void __init kirkwood_timer_init(void)
 {
 	kirkwood_tclk = kirkwood_find_tclk();
-	orion_time_init(IRQ_KIRKWOOD_BRIDGE, kirkwood_tclk);
+
+	orion_time_init(BRIDGE_VIRT_BASE, BRIDGE_INT_TIMER1_CLR,
+			IRQ_KIRKWOOD_BRIDGE, kirkwood_tclk);
 }
 
 struct sys_timer kirkwood_timer = {
@@ -903,10 +910,16 @@ static struct platform_device kirkwood_i2s_device = {
 	},
 };
 
+static struct platform_device kirkwood_pcm_device = {
+	.name		= "kirkwood-pcm-audio",
+	.id		= -1,
+};
+
 void __init kirkwood_audio_init(void)
 {
 	kirkwood_clk_ctrl |= CGC_AUDIO;
 	platform_device_register(&kirkwood_i2s_device);
+	platform_device_register(&kirkwood_pcm_device);
 }
 
 /*****************************************************************************
@@ -998,6 +1011,10 @@ void __init kirkwood_init(void)
 	kirkwood_xor0_init();
 	kirkwood_xor1_init();
 	kirkwood_crypto_init();
+
+#ifdef CONFIG_KEXEC 
+	kexec_reinit = kirkwood_enable_pcie;
+#endif
 }
 
 static int __init kirkwood_clock_gate(void)

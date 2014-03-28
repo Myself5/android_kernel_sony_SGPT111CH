@@ -62,8 +62,8 @@ static int cciss_scsi_proc_info(
 		int length, 	   /* length of data in buffer */
 		int func);	   /* 0 == read, 1 == write */
 
-static int cciss_scsi_queue_command (struct scsi_cmnd *cmd,
-		void (* done)(struct scsi_cmnd *));
+static int cciss_scsi_queue_command (struct Scsi_Host *h,
+				     struct scsi_cmnd *cmd);
 static int cciss_eh_device_reset_handler(struct scsi_cmnd *);
 static int cciss_eh_abort_handler(struct scsi_cmnd *);
 
@@ -824,12 +824,17 @@ static void complete_scsi_command(CommandList_struct *c, int timeout,
 			break;
 			case CMD_UNSOLICITED_ABORT:
 				cmd->result = DID_ABORT << 16;
-				dev_warn(&h->pdev->dev, "%p aborted do to an "
+				dev_warn(&h->pdev->dev, "%p aborted due to an "
 					"unsolicited abort\n", c);
 			break;
 			case CMD_TIMEOUT:
 				cmd->result = DID_TIME_OUT << 16;
 				dev_warn(&h->pdev->dev, "%p timedout\n", c);
+			break;
+			case CMD_UNABORTABLE:
+				cmd->result = DID_ERROR << 16;
+				dev_warn(&h->pdev->dev, "c %p command "
+					"unabortable\n", c);
 			break;
 			default:
 				cmd->result = DID_ERROR << 16;
@@ -1007,10 +1012,14 @@ cciss_scsi_interpret_error(ctlr_info_t *h, CommandList_struct *c)
 		break;
 		case CMD_UNSOLICITED_ABORT:
 			dev_warn(&h->pdev->dev,
-				"%p aborted do to an unsolicited abort\n", c);
+				"%p aborted due to an unsolicited abort\n", c);
 		break;
 		case CMD_TIMEOUT:
 			dev_warn(&h->pdev->dev, "%p timedout\n", c);
+		break;
+		case CMD_UNABORTABLE:
+			dev_warn(&h->pdev->dev,
+				"%p unabortable\n", c);
 		break;
 		default:
 			dev_warn(&h->pdev->dev,
@@ -1406,7 +1415,7 @@ static void cciss_scatter_gather(ctlr_info_t *h, CommandList_struct *c,
 
 
 static int
-cciss_scsi_queue_command (struct scsi_cmnd *cmd, void (* done)(struct scsi_cmnd *))
+cciss_scsi_queue_command_lck(struct scsi_cmnd *cmd, void (*done)(struct scsi_cmnd *))
 {
 	ctlr_info_t *h;
 	int rc;
@@ -1503,6 +1512,8 @@ cciss_scsi_queue_command (struct scsi_cmnd *cmd, void (* done)(struct scsi_cmnd 
 	/* the cmd'll come back via intr handler in complete_scsi_command()  */
 	return 0;
 }
+
+static DEF_SCSI_QCMD(cciss_scsi_queue_command)
 
 static void cciss_unregister_scsi(ctlr_info_t *h)
 {

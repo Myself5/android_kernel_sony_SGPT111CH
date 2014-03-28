@@ -12,14 +12,20 @@
 #ifndef TEGRA_PWM_BL_H
 #define TEGRA_PWM_BL_H
 
+#include <linux/backlight.h>
+
 struct platform_tegra_pwm_backlight_data {
 	int which_dc;
 	int which_pwm;
+	void (*switch_to_sfio)(int);
+	int gpio_conf_to_sfio;
 	unsigned int dft_brightness;
 	unsigned int max_brightness;
 	unsigned int period;
 	unsigned int clk_div;
 	unsigned int clk_select;
+	int (*notify)(struct device *dev, int brightness);
+	int (*check_fb)(struct device *dev, struct fb_info *info);
 };
 
 #endif /* TERGA_PWM_BL_H */

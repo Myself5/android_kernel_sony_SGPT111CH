@@ -164,26 +164,29 @@ int dst_discard(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(dst_discard);
 
-void *dst_alloc(struct dst_ops *ops)
+const u32 dst_default_metrics[RTAX_MAX];
+
+void *dst_alloc(struct dst_ops *ops, int initial_ref)
 {
 	struct dst_entry *dst;
 
-	if (ops->gc && atomic_read(&ops->entries) > ops->gc_thresh) {
+	if (ops->gc && dst_entries_get_fast(ops) > ops->gc_thresh) {
 		if (ops->gc(ops))
 			return NULL;
 	}
 	dst = kmem_cache_zalloc(ops->kmem_cachep, GFP_ATOMIC);
 	if (!dst)
 		return NULL;
-	atomic_set(&dst->__refcnt, 0);
+	atomic_set(&dst->__refcnt, initial_ref);
 	dst->ops = ops;
 	dst->lastuse = jiffies;
 	dst->path = dst;
 	dst->input = dst->output = dst_discard;
+	dst_init_metrics(dst, dst_default_metrics, true);
 #if RT_CACHE_DEBUG >= 2
 	atomic_inc(&dst_total);
 #endif
-	atomic_inc(&ops->entries);
+	dst_entries_add(ops, 1);
 	return dst;
 }
 EXPORT_SYMBOL(dst_alloc);
@@ -228,15 +231,15 @@ again:
 	child = dst->child;
 
 	dst->hh = NULL;
-	if (hh && atomic_dec_and_test(&hh->hh_refcnt))
-		kfree(hh);
+	if (hh)
+		hh_cache_put(hh);
 
 	if (neigh) {
 		dst->neighbour = NULL;
 		neigh_release(neigh);
 	}
 
-	atomic_dec(&dst->ops->entries);
+	dst_entries_add(dst->ops, -1);
 
 	if (dst->ops->destroy)
 		dst->ops->destroy(dst);
@@ -271,12 +274,75 @@ void dst_release(struct dst_entry *dst)
 	if (dst) {
 		int newrefcnt;
 
-		smp_mb__before_atomic_dec();
 		newrefcnt = atomic_dec_return(&dst->__refcnt);
 		WARN_ON(newrefcnt < 0);
+		if (unlikely(dst->flags & DST_NOCACHE) && !newrefcnt) {
+			dst = dst_destroy(dst);
+			if (dst)
+				__dst_free(dst);
+		}
 	}
 }
 EXPORT_SYMBOL(dst_release);
+
+u32 *dst_cow_metrics_generic(struct dst_entry *dst, unsigned long old)
+{
+	u32 *p = kmalloc(sizeof(u32) * RTAX_MAX, GFP_ATOMIC);
+
+	if (p) {
+		u32 *old_p = __DST_METRICS_PTR(old);
+		unsigned long prev, new;
+
+		memcpy(p, old_p, sizeof(u32) * RTAX_MAX);
+
+		new = (unsigned long) p;
+		prev = cmpxchg(&dst->_metrics, old, new);
+
+		if (prev != old) {
+			kfree(p);
+			p = __DST_METRICS_PTR(prev);
+			if (prev & DST_METRICS_READ_ONLY)
+				p = NULL;
+		}
+	}
+	return p;
+}
+EXPORT_SYMBOL(dst_cow_metrics_generic);
+
+/* Caller asserts that dst_metrics_read_only(dst) is false.  */
+void __dst_destroy_metrics_generic(struct dst_entry *dst, unsigned long old)
+{
+	unsigned long prev, new;
+
+	new = ((unsigned long) dst_default_metrics) | DST_METRICS_READ_ONLY;
+	prev = cmpxchg(&dst->_metrics, old, new);
+	if (prev == old)
+		kfree(__DST_METRICS_PTR(old));
+}
+EXPORT_SYMBOL(__dst_destroy_metrics_generic);
+
+/**
+ * skb_dst_set_noref - sets skb dst, without a reference
+ * @skb: buffer
+ * @dst: dst entry
+ *
+ * Sets skb dst, assuming a reference was not taken on dst
+ * skb_dst_drop() should not dst_release() this dst
+ */
+void skb_dst_set_noref(struct sk_buff *skb, struct dst_entry *dst)
+{
+	WARN_ON(!rcu_read_lock_held() && !rcu_read_lock_bh_held());
+	/* If dst not in cache, we must take a reference, because
+	 * dst_release() will destroy dst as soon as its refcount becomes zero
+	 */
+	if (unlikely(dst->flags & DST_NOCACHE)) {
+		dst_hold(dst);
+		skb_dst_set(skb, dst);
+	} else {
+		skb->_skb_refdst = (unsigned long)dst | SKB_DST_NOREF;
+	}
+}
+EXPORT_SYMBOL(skb_dst_set_noref);
 
 /* Dirty hack. We did it in 2.2 (in __dst_free),
  * we have _very_ good reasons not to repeat

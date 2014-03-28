@@ -1,6 +1,5 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.
@@ -12,13 +11,11 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
-/* EC IPC */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/slab.h>
-#include <linux/platform_device.h>
 #include <linux/workqueue.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -26,26 +23,24 @@
 #include <linux/suspend.h>
 #include <linux/err.h>
 #include <linux/semaphore.h>
+#include <linux/suspend.h>
 
 #include <linux/nbx_ec_ipc.h>
 #include "ec_ipc_serial.h"
 
 /*#define DBGPRINT*/
 
-#define LOCKED_STATEMENT(mutex, statement)			\
-	do {							\
-		if(0 != down_interruptible(mutex)) break;	\
-		do {						\
-			statement;				\
-		} while(0);					\
-		up(mutex);					\
-	} while(0)
+#define LOCKED_STATEMENT(mutex, statement)	\
+	down(mutex);				\
+	do {					\
+		statement;			\
+	} while(0);				\
+	up(mutex);
 
 static DECLARE_WAIT_QUEUE_HEAD(ec_ipc_tx_wait);
 static volatile int ec_ipc_tx_active;
 
-static atomic_t ec_ipc_tx_thread_alive;
-static atomic_t ec_ipc_rx_thread_alive;
+static atomic_t ec_ipc_work_alive;
 
 static inline int read_and_set(volatile int* p, int val)
 { int ret = *p; *p = val; return ret; }
@@ -66,13 +61,14 @@ static inline int read_and_set(volatile int* p, int val)
 #define sizeof_PACKET_FOOT (1+1) /* checksum, foot sign */
 
 static LIST_HEAD(request_list);
-static DECLARE_MUTEX(request_list_mutex);
+static DEFINE_SEMAPHORE(request_list_mutex);
+static atomic_t request_enable;
 
 static LIST_HEAD(event_list);
-static DECLARE_MUTEX(event_list_mutex);
+static DEFINE_SEMAPHORE(event_list_mutex);
 
 static uint8_t ec_ipc_request_frame_num;
-static DECLARE_MUTEX(request_frame_num_mutex);
+static DEFINE_SEMAPHORE(request_frame_num_mutex);
 
 struct request_t {
 	struct list_head list;
@@ -109,12 +105,11 @@ static struct request_t* construct_request(uint8_t pid, uint8_t cid, uint8_t fra
 	uint8_t sum = 0;
 	struct request_t* new_req;
 
-	new_req = kmalloc(sizeof(struct request_t), GFP_KERNEL);
+	new_req = kzalloc(sizeof(struct request_t), GFP_KERNEL);
 	if(new_req == NULL) return NULL;
-	memset(new_req, 0, sizeof(struct request_t));
 
 	new_req->sizeof_sendbuf = sizeof_PACKET_HEAD + size + sizeof_PACKET_FOOT;
-	new_req->sendbuf = kmalloc(new_req->sizeof_sendbuf, GFP_KERNEL);
+	new_req->sendbuf = kzalloc(new_req->sizeof_sendbuf, GFP_KERNEL);
 	if(new_req->sendbuf == NULL) {
 		kfree(new_req);
 		return NULL;
@@ -169,7 +164,7 @@ int ec_ipc_send_request_async(uint8_t pid, uint8_t cid, const uint8_t* buf, int 
 	if(new_req == NULL) return -ENOMEM;
 
 	LOCKED_STATEMENT( &request_list_mutex,
-			if(atomic_read(&ec_ipc_tx_thread_alive)) {
+			if(atomic_read(&request_enable)) {
 				INIT_LIST_HEAD(&(new_req->list));
 				list_add_tail(&(new_req->list), &request_list);
 			}
@@ -227,7 +222,7 @@ struct block_request_t {
 };
 
 static LIST_HEAD(block_request_list);
-static DECLARE_MUTEX(block_request_list_mutex);
+static DEFINE_SEMAPHORE(block_request_list_mutex);
 
 static void ec_ipc_receive_response(const uint8_t* buf, int size, void* private_data)
 {
@@ -322,7 +317,7 @@ int ec_ipc_register_recv_event(uint8_t cid, void (*event_func)(const uint8_t* bu
 {
 	struct event_t* reg_event;
 
-	reg_event = kmalloc(sizeof(reg_event), GFP_KERNEL);
+	reg_event = kzalloc(sizeof(struct event_t), GFP_KERNEL);
 	if(reg_event == NULL) return -ENOMEM;
 
 	reg_event->cid = cid;
@@ -355,13 +350,94 @@ int ec_ipc_unregister_recv_event(uint8_t cid)
 }
 EXPORT_SYMBOL(ec_ipc_unregister_recv_event);
 
+/*********** query EC INT I/F. *************/
+static DECLARE_WAIT_QUEUE_HEAD(ec_int_wait);
+static atomic_t ec_int_updated;
+static uint8_t ec_int_factor;
+
+static void ec_ipc_query_ec_int_response(const uint8_t* buf, int size, void* private_data)
+{
+	enum {
+		QUERY_ECINT_RES_WAKEUP = 0,
+		QUERY_ECINT_RES_SHUTDOWN,
+		NOOF_QUERY_ECINT_RES,
+	};
+
+#define QUERY_ECINT_RES_WAKEUP_POWERKEY (1 << 0)
+#define QUERY_ECINT_RES_WAKEUP_LID      (1 << 1)
+#define QUERY_ECINT_RES_WAKEUP_TOPCOVER (1 << 2)
+#define QUERY_ECINT_RES_WAKEUP_SHUTREQ  (1 << 3)
+#define QUERY_ECINT_RES_WAKEUP_AC       (1 << 4)
+
+	ec_int_factor = 0;
+
+	if( (buf != NULL) && (NOOF_QUERY_ECINT_RES <= size) ){
+		if(buf[QUERY_ECINT_RES_WAKEUP] & QUERY_ECINT_RES_WAKEUP_POWERKEY) {
+			ec_int_factor |= EC_INT_POWERKEY;
+		}
+		if(buf[QUERY_ECINT_RES_WAKEUP] & QUERY_ECINT_RES_WAKEUP_LID) {
+			ec_int_factor |= EC_INT_LID;
+		}
+		if(buf[QUERY_ECINT_RES_WAKEUP] & QUERY_ECINT_RES_WAKEUP_TOPCOVER) {
+			ec_int_factor |= EC_INT_TOPCOVER;
+		}
+		if(buf[QUERY_ECINT_RES_WAKEUP] & QUERY_ECINT_RES_WAKEUP_SHUTREQ) {
+			ec_int_factor |= EC_INT_SHUTREQ;
+		}
+		if(buf[QUERY_ECINT_RES_WAKEUP] & QUERY_ECINT_RES_WAKEUP_AC) {
+			ec_int_factor |= EC_INT_AC;
+		}
+#ifdef DBGPRINT
+		pr_info("ec_ipc:EC INT %s%s%s%s%s\n",
+			((ec_int_factor & EC_INT_POWERKEY) ? "POWERKEY " : ""),
+			((ec_int_factor & EC_INT_LID) ? "LID " : ""),
+			((ec_int_factor & EC_INT_TOPCOVER) ? "TOPCOVER " : ""),
+			((ec_int_factor & EC_INT_SHUTREQ) ? "SHUTREQ " : ""),
+			((ec_int_factor & EC_INT_AC) ? "AC" : ""));
+#endif
+	}
+	else {
+		pr_err("nbx_ec_ipc:query EC INT failed.\n");
+	}
+
+	atomic_set(&ec_int_updated, 1);
+	wake_up_interruptible(&ec_int_wait);
+}
+
+static void ec_ipc_query_ec_int(void)
+{
+#define EC_IPC_CID_QUERY_ECINT_REQUEST 0x94
+
+	atomic_set(&ec_int_updated, 0);
+	ec_int_factor = 0;
+
+	ec_ipc_send_request_async(EC_IPC_PID_ECINT, EC_IPC_CID_QUERY_ECINT_REQUEST, NULL, 0,
+				&ec_ipc_query_ec_int_response, NULL);
+}
+
+int ec_ipc_get_ec_int_factor(uint8_t factor)
+{
+	int ret;
+
+	ret = wait_event_interruptible_timeout(ec_int_wait, (atomic_read(&ec_int_updated) != 0), (10 * HZ));
+	if(0 < ret) {
+		return ((ec_int_factor & factor) != 0);
+	}
+	else {
+		pr_err("nbx_ec_ipc:ec_ipc_get_ec_int_factor() timeout or interrupt.\n");
+		return 0;
+	}
+}
+EXPORT_SYMBOL(ec_ipc_get_ec_int_factor);
+/*********** query EC INT I/F. over ********/
+
 /*########################################################*/
 
 static void ec_ipc_tx_thread(struct work_struct* work)
 {
 	long timeout_remain = HZ;
 
-	while(atomic_read(&ec_ipc_tx_thread_alive)) {
+	while(atomic_read(&ec_ipc_work_alive)) {
 		uint8_t* sendbuf = NULL;
 		int sizeof_sendbuf = 0;
 
@@ -383,7 +459,7 @@ static void ec_ipc_tx_thread(struct work_struct* work)
 					/* sending new request */
 					timeout_remain = HZ;
 					sizeof_sendbuf = tx_current->sizeof_sendbuf;
-					sendbuf = kmalloc(sizeof_sendbuf, GFP_KERNEL);
+					sendbuf = kzalloc(sizeof_sendbuf, GFP_KERNEL);
 					if(sendbuf == NULL) break;
 
 					tx_current->sending = 1;
@@ -436,11 +512,11 @@ static void ec_ipc_tx_thread(struct work_struct* work)
 
 		timeout_remain =
 			wait_event_interruptible_timeout(ec_ipc_tx_wait,
-							!atomic_read(&ec_ipc_tx_thread_alive) ||
+							!atomic_read(&ec_ipc_work_alive) ||
 							read_and_set(&ec_ipc_tx_active, 0),
 							timeout_remain);
 
-		if(!atomic_read(&ec_ipc_tx_thread_alive)) break;
+		if(!atomic_read(&ec_ipc_work_alive)) break;
 
 		{
 			void (*res_func)(const uint8_t*, int, void*) = NULL;
@@ -534,7 +610,7 @@ static void ec_ipc_rx_thread(struct work_struct* work)
 	int recv_packet_comp;
 	uint8_t dummy_size0;
 
-	while(atomic_read(&ec_ipc_rx_thread_alive)) {
+	while(atomic_read(&ec_ipc_work_alive)) {
 
 		if(0 != ec_ipc_serial_open()) {
 			msleep(50);
@@ -583,13 +659,12 @@ static void ec_ipc_rx_thread(struct work_struct* work)
 
 		recv_data_size = recv_size - (sizeof_PACKET_HEAD + sizeof_PACKET_FOOT);
 		if(0 < recv_data_size) {
-			recv_data = kmalloc(recv_data_size, GFP_KERNEL);
+			recv_data = kzalloc(recv_data_size, GFP_KERNEL);
 		}
 		else{
 			recv_data = &dummy_size0;
 		}
 		if(recv_data == NULL) break;
-		memset(recv_data, 0, recv_data_size);
 
 		do {
 			/* receive frame num */
@@ -723,10 +798,11 @@ static int ec_ipc_rx_response(uint8_t frame_num, uint8_t pid, uint8_t cid, uint8
 	}
 #endif
 
+	if(!atomic_read(&ec_ipc_work_alive)) return ret;
+
 	LOCKED_STATEMENT(&request_list_mutex,
 			struct request_t* tx_current = request_list_top();
 			if(tx_current == NULL) break;
-			if(!atomic_read(&ec_ipc_rx_thread_alive)) break;
 
 			if((tx_current->frame_num == frame_num) &&
 				(tx_current->pid == pid) &&
@@ -743,6 +819,10 @@ static int ec_ipc_rx_response(uint8_t frame_num, uint8_t pid, uint8_t cid, uint8
 
 				tx_current->done = 1;
 				ret = 0;
+			}
+			else {
+				pr_warning("ec_ipc:missed response. f_num %x pid %x cid %x",
+					frame_num, pid, cid);
 			}
 		);
 
@@ -769,9 +849,9 @@ static void ec_ipc_rx_event(uint8_t frame_num, uint8_t pid, uint8_t cid, uint8_t
 	}
 #endif
 
-	LOCKED_STATEMENT(&event_list_mutex,
-			if(!atomic_read(&ec_ipc_rx_thread_alive)) break;
+	if(!atomic_read(&ec_ipc_work_alive)) return;
 
+	LOCKED_STATEMENT(&event_list_mutex,
 			list_for_each_entry(event, &event_list, list) {
 				if(event->cid == cid) {
 					event_func = event->event_func;
@@ -792,7 +872,7 @@ static struct work_struct ec_ipc_tx_work;
 static struct workqueue_struct* ec_ipc_rx_workqueue;
 static struct work_struct ec_ipc_rx_work;
 
-static int __init ec_ipc_probe(struct platform_device* pdev)
+static int __init ec_ipc_probe(struct nbx_ec_ipc_device* edev)
 {
 	int ret = 0;
 
@@ -824,10 +904,13 @@ static int __init ec_ipc_probe(struct platform_device* pdev)
 	INIT_WORK(&ec_ipc_tx_work, ec_ipc_tx_thread);
 	INIT_WORK(&ec_ipc_rx_work, ec_ipc_rx_thread);
 
-	atomic_set(&ec_ipc_tx_thread_alive, 1);
+	atomic_set(&request_enable, 1);
+	atomic_set(&ec_ipc_work_alive, 1);
 	queue_work(ec_ipc_tx_workqueue, &ec_ipc_tx_work);
-	atomic_set(&ec_ipc_rx_thread_alive, 1);
 	queue_work(ec_ipc_rx_workqueue, &ec_ipc_rx_work);
+
+	atomic_set(&ec_int_updated, 1);
+	ec_int_factor = 0;
 
 	return 0;
 
@@ -841,13 +924,13 @@ error_exit:
 
 	return ret;
 }
-static int ec_ipc_remove(struct platform_device* pdev)
+static int ec_ipc_remove(struct nbx_ec_ipc_device* edev)
 {
 	struct event_t* del_event;
 	struct event_t* n_event;
 
-	atomic_set(&ec_ipc_tx_thread_alive, 0);
-	atomic_set(&ec_ipc_rx_thread_alive, 0);
+	atomic_set(&request_enable, 0);
+	atomic_set(&ec_ipc_work_alive, 0);
 	wake_up_interruptible(&ec_ipc_tx_wait);
 
 	flush_work(&ec_ipc_tx_work);
@@ -870,30 +953,30 @@ static int ec_ipc_remove(struct platform_device* pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
+static void ec_ipc_shutdown(struct nbx_ec_ipc_device* edev)
+{
+	atomic_set(&request_enable, 0);
+	atomic_set(&ec_ipc_work_alive, 0);
+	wake_up_interruptible(&ec_ipc_tx_wait);
 
-extern int nbx_ec_suspend_suspend(pm_message_t state);
+	flush_work(&ec_ipc_tx_work);
+	flush_work(&ec_ipc_rx_work);
+
+	ec_ipc_serial_close();
+}
+
+#ifdef CONFIG_SUSPEND
+
+extern int nbx_ec_suspend_suspend(void);
 extern int nbx_ec_suspend_resume(void);
 
-static int ec_ipc_suspend(struct platform_device* pdev, pm_message_t state)
+static int ec_ipc_suspend(struct nbx_ec_ipc_device* edev)
 {
-	/* stop & clear -> restert & send power state change (must send last) -> stop */
-	atomic_set(&ec_ipc_tx_thread_alive, 0);
-	atomic_set(&ec_ipc_rx_thread_alive, 0);
-	wake_up_interruptible(&ec_ipc_tx_wait);
+	/* send power state change (must send last) -> stop */
+	nbx_ec_suspend_suspend();
 
-	flush_work(&ec_ipc_tx_work);
-	flush_work(&ec_ipc_rx_work);
-
-	atomic_set(&ec_ipc_tx_thread_alive, 1);
-	queue_work(ec_ipc_tx_workqueue, &ec_ipc_tx_work);
-	atomic_set(&ec_ipc_rx_thread_alive, 1);
-	queue_work(ec_ipc_rx_workqueue, &ec_ipc_rx_work);
-
-	nbx_ec_suspend_suspend(state);
-
-	atomic_set(&ec_ipc_tx_thread_alive, 0);
-	atomic_set(&ec_ipc_rx_thread_alive, 0);
+	atomic_set(&request_enable, 0);
+	atomic_set(&ec_ipc_work_alive, 0);
 	wake_up_interruptible(&ec_ipc_tx_wait);
 
 	flush_work(&ec_ipc_tx_work);
@@ -903,76 +986,56 @@ static int ec_ipc_suspend(struct platform_device* pdev, pm_message_t state)
 
 	return 0;
 }
-static int ec_ipc_resume(struct platform_device* pdev)
+
+static int ec_ipc_resume(struct nbx_ec_ipc_device* edev)
 {
-	atomic_set(&ec_ipc_tx_thread_alive, 1);
+	atomic_set(&request_enable, 1);
+	atomic_set(&ec_ipc_work_alive, 1);
 	queue_work(ec_ipc_tx_workqueue, &ec_ipc_tx_work);
-	atomic_set(&ec_ipc_rx_thread_alive, 1);
 	queue_work(ec_ipc_rx_workqueue, &ec_ipc_rx_work);
 
-	/* send power state change (must send first) */
+	/* async send power state change (must send first) */
 	nbx_ec_suspend_resume();
 
+	/* async start query EC INT factor. */
+	ec_ipc_query_ec_int();
+
 	return 0;
 }
 
-#else /* CONFIG_PM */
+#else /* !CONFIG_SUSPEND */
 
-static int ec_ipc_suspend(struct platform_device* pdev, pm_message_t state)
-{ return 0; }
-static int ec_ipc_resume(struct platform_device* pdev)
-{ return 0; }
+#define ec_ipc_suspend NULL
+#define ec_ipc_resume NULL
 
-#endif /* CONFIG_PM */
+#endif /* CONFIG_SUSPEND */
 
-static void ec_ipc_shutdown(struct platform_device* pdev)
-{
-	atomic_set(&ec_ipc_tx_thread_alive, 0);
-	atomic_set(&ec_ipc_rx_thread_alive, 0);
-	wake_up_interruptible(&ec_ipc_tx_wait);
-
-	flush_work(&ec_ipc_tx_work);
-	flush_work(&ec_ipc_rx_work);
-
-	ec_ipc_serial_close();
-}
-
-static struct platform_driver ec_ipc_driver = {
+static struct nbx_ec_ipc_driver ec_ipc_driver = {
 	.probe    = ec_ipc_probe,
 	.remove   = ec_ipc_remove,
 	.shutdown = ec_ipc_shutdown,
 	.suspend  = ec_ipc_suspend,
 	.resume   = ec_ipc_resume,
-	.driver   = {
-		.name = "ec_ipc",
+	.drv   = {
+		.name = "nbx_ec_ipc",
 	},
 };
-
-static struct platform_device* ec_ipc_dev;
 
 static int __init ec_ipc_init(void)
 {
 	int ret;
 
-	/* enable send request before first run */
-	atomic_set(&ec_ipc_tx_thread_alive, 1);
-
-	ret = platform_driver_register(&ec_ipc_driver);
-	if(ret < 0) return ret;
-
-	ret = 0;
-	ec_ipc_dev = platform_device_register_simple("ec_ipc", 0, NULL, 0);
-	if (IS_ERR(ec_ipc_dev)) {
-		ret = PTR_ERR(ec_ipc_dev);
-		platform_driver_unregister(&ec_ipc_driver);
+	ret = nbx_ec_ipc_driver_register(&ec_ipc_driver);
+	if(ret < 0) {
+		pr_err("%s:nbx_ec_ipc_driver_register() failed, %d\n", __func__, ret);
+		return ret;
 	}
 
 	return ret;
 }
 static void __exit ec_ipc_exit(void)
 {
-	platform_device_unregister(ec_ipc_dev);
-	platform_driver_unregister(&ec_ipc_driver);
+	nbx_ec_ipc_driver_unregister(&ec_ipc_driver);
 }
 
 module_init(ec_ipc_init);

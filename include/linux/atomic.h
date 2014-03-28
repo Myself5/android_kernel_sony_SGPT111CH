@@ -1,4 +1,3 @@
-/* 2011-06-10: File added by Sony Corporation */
 #ifndef _LINUX_ATOMIC_H
 #define _LINUX_ATOMIC_H
 #include <asm/atomic.h>

@@ -1,3 +1,4 @@
+/* 2012-07-20: File changed by Sony Corporation */
 /*
  *  linux/kernel/time/tick-sched.c
  *
@@ -19,7 +20,6 @@
 #include <linux/percpu.h>
 #include <linux/profile.h>
 #include <linux/sched.h>
-#include <linux/tick.h>
 #include <linux/module.h>
 
 #include <asm/irq_regs.h>
@@ -642,8 +642,7 @@ static void tick_nohz_switch_to_nohz(void)
 	}
 	local_irq_enable();
 
-	printk(KERN_INFO "Switched to NOHz mode on CPU #%d\n",
-	       smp_processor_id());
+	pr_debug("Switched to NOHz mode on CPU #%d\n", smp_processor_id());
 }
 
 /*
@@ -795,8 +794,10 @@ void tick_setup_sched_timer(void)
 	}
 
 #ifdef CONFIG_NO_HZ
-	if (tick_nohz_enabled)
+	if (tick_nohz_enabled) {
 		ts->nohz_mode = NOHZ_MODE_HIGHRES;
+		pr_debug("Switched to NOHz mode on CPU #%d\n", smp_processor_id());
+	}
 #endif
 }
 #endif /* HIGH_RES_TIMERS */

@@ -1409,7 +1409,7 @@ force_link:
 	hp->timer_ticks = 0;
 	hp->happy_timer.expires = jiffies + (12 * HZ)/10;  /* 1.2 sec. */
 	hp->happy_timer.data = (unsigned long) hp;
-	hp->happy_timer.function = &happy_meal_timer;
+	hp->happy_timer.function = happy_meal_timer;
 	add_timer(&hp->happy_timer);
 }
 
@@ -2266,7 +2266,7 @@ static netdev_tx_t happy_meal_start_xmit(struct sk_buff *skb,
 
 	tx_flags = TXFLAG_OWN;
 	if (skb->ip_summed == CHECKSUM_PARTIAL) {
-		const u32 csum_start_off = skb_transport_offset(skb);
+		const u32 csum_start_off = skb_checksum_start_offset(skb);
 		const u32 csum_stuff_off = csum_start_off + skb->csum_offset;
 
 		tx_flags = (TXFLAG_OWN | TXFLAG_CSENABLE |
@@ -2497,7 +2497,7 @@ static u32 hme_get_link(struct net_device *dev)
 	hp->sw_bmcr = happy_meal_tcvr_read(hp, hp->tcvregs, MII_BMCR);
 	spin_unlock_irq(&hp->happy_lock);
 
-	return (hp->sw_bmsr & BMSR_LSTATUS);
+	return hp->sw_bmsr & BMSR_LSTATUS;
 }
 
 static const struct ethtool_ops hme_ethtool_ops = {
@@ -2808,7 +2808,8 @@ static int __devinit happy_meal_sbus_probe_one(struct platform_device *op, int i
 	happy_meal_set_initial_advertisement(hp);
 	spin_unlock_irq(&hp->happy_lock);
 
-	if (register_netdev(hp->dev)) {
+	err = register_netdev(hp->dev);
+	if (err) {
 		printk(KERN_ERR "happymeal: Cannot register net device, "
 		       "aborting.\n");
 		goto err_out_free_coherent;
@@ -3130,7 +3131,8 @@ static int __devinit happy_meal_pci_probe(struct pci_dev *pdev,
 	happy_meal_set_initial_advertisement(hp);
 	spin_unlock_irq(&hp->happy_lock);
 
-	if (register_netdev(hp->dev)) {
+	err = register_netdev(hp->dev);
+	if (err) {
 		printk(KERN_ERR "happymeal(PCI): Cannot register net device, "
 		       "aborting.\n");
 		goto err_out_iounmap;
@@ -3235,11 +3237,18 @@ static void happy_meal_pci_exit(void)
 #endif
 
 #ifdef CONFIG_SBUS
-static int __devinit hme_sbus_probe(struct platform_device *op, const struct of_device_id *match)
+static const struct of_device_id hme_sbus_match[];
+static int __devinit hme_sbus_probe(struct platform_device *op)
 {
+	const struct of_device_id *match;
 	struct device_node *dp = op->dev.of_node;
 	const char *model = of_get_property(dp, "model", NULL);
-	int is_qfe = (match->data != NULL);
+	int is_qfe;
+
+	match = of_match_device(hme_sbus_match, &op->dev);
+	if (!match)
+		return -EINVAL;
+	is_qfe = (match->data != NULL);
 
 	if (!is_qfe && model && !strcmp(model, "SUNW,sbus-qfe"))
 		is_qfe = 1;
@@ -3290,7 +3299,7 @@ static const struct of_device_id hme_sbus_match[] = {
 
 MODULE_DEVICE_TABLE(of, hme_sbus_match);
 
-static struct of_platform_driver hme_sbus_driver = {
+static struct platform_driver hme_sbus_driver = {
 	.driver = {
 		.name = "hme",
 		.owner = THIS_MODULE,
@@ -3304,7 +3313,7 @@ static int __init happy_meal_sbus_init(void)
 {
 	int err;
 
-	err = of_register_platform_driver(&hme_sbus_driver);
+	err = platform_driver_register(&hme_sbus_driver);
 	if (!err)
 		err = quattro_sbus_register_irqs();
 
@@ -3313,7 +3322,7 @@ static int __init happy_meal_sbus_init(void)
 
 static void happy_meal_sbus_exit(void)
 {
-	of_unregister_platform_driver(&hme_sbus_driver);
+	platform_driver_unregister(&hme_sbus_driver);
 	quattro_sbus_free_irqs();
 
 	while (qfe_sbus_list) {

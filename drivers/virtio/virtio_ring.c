@@ -230,9 +230,6 @@ add_head:
 	pr_debug("Added buffer head %i to %p\n", head, vq);
 	END_USE(vq);
 
-	/* If we're indirect, we can fit many (assuming not OOM). */
-	if (vq->indirect)
-		return vq->num_free ? vq->vring.num : 0;
 	return vq->num_free;
 }
 EXPORT_SYMBOL_GPL(virtqueue_add_buf_gfp);
@@ -374,6 +371,7 @@ void *virtqueue_detach_unused_buf(struct virtqueue *_vq)
 		/* detach_buf clears data, so grab it now. */
 		buf = vq->data[i];
 		detach_buf(vq, i);
+		vq->vring.avail->idx--;
 		END_USE(vq);
 		return buf;
 	}

@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * arch/arm/mach-tegra/board-nbx02-panel.c
  *
@@ -28,7 +28,7 @@
 #include <linux/earlysuspend.h>
 #include <linux/pwm_backlight.h>
 #include <linux/nbx02_backlight.h>
-#include <mach/nvhost.h>
+#include <linux/nvhost.h>
 #include <mach/nvmap.h>
 #include <mach/irqs.h>
 #include <mach/iomap.h>
@@ -51,13 +51,13 @@ static struct platform_nbx02_backlight_data nbx02_backlight_data = {
 	.pwm[0] = {
 		.pwm_id		= 0,
 		.max_brightness	= 255,
-		.dft_brightness	= 224,
+		.dft_brightness	= 255,
 		.pwm_period_ns	= 2777777,
 	},
 	.pwm[1] = {
 		.pwm_id		= 1,
 		.max_brightness	= 255,
-		.dft_brightness	= 224,
+		.dft_brightness	= 255,
 		.pwm_period_ns	= 2777777,
 	},
 };
@@ -134,8 +134,46 @@ static void nbx02_panel_off(void)
 
 static void nbx02_panel_resume(void)
 {
-	u8 values[2];
+	u8 values[5];
 	struct i2c_adapter *adap = i2c_get_adapter(1);
+
+	gpio_set_value(nbx02_Lcd0ResetN, 0x0);
+	gpio_set_value(nbx02_Lcd1ResetN, 0x0);
+	msleep(10);
+	gpio_set_value(nbx02_Lcd0ResetN, 0x1);
+	gpio_set_value(nbx02_Lcd1ResetN, 0x1);
+	msleep(20);
+
+	values[0] = 0xB0;
+	values[1] = 0x04;
+	nbx02_lcd_i2c_write(adap, LCD_I2C_ADDR_UPPER, values, 2);
+	nbx02_lcd_i2c_write(adap, LCD_I2C_ADDR_LOWER, values, 2);
+	values[0] = 0xD1;
+	values[1] = 0x10;
+	values[2] = 0x14;
+	values[3] = 0x53;
+	values[4] = 0xE3;
+	nbx02_lcd_i2c_write(adap, LCD_I2C_ADDR_UPPER, values, 5);
+	nbx02_lcd_i2c_write(adap, LCD_I2C_ADDR_LOWER, values, 5);
+	values[0] = 0xB0;
+	values[1] = 0x03;
+	nbx02_lcd_i2c_write(adap, LCD_I2C_ADDR_UPPER, values, 2);
+	nbx02_lcd_i2c_write(adap, LCD_I2C_ADDR_LOWER, values, 2);
+
+	values[0] = 0x36;
+	values[1] = 0x00;
+	nbx02_lcd_i2c_write(adap, LCD_I2C_ADDR_UPPER, values, 2);
+	nbx02_lcd_i2c_write(adap, LCD_I2C_ADDR_LOWER, values, 2);
+	values[0] = 0x3a;
+	values[1] = 0x60;
+	nbx02_lcd_i2c_write(adap, LCD_I2C_ADDR_UPPER, values, 2);
+	nbx02_lcd_i2c_write(adap, LCD_I2C_ADDR_LOWER, values, 2);
+	values[0] = 0xc6;
+	values[1] = 0x11;
+	nbx02_lcd_i2c_write(adap, LCD_I2C_ADDR_UPPER, values, 2);
+	values[0] = 0xc6;
+	values[1] = 0x21;
+	nbx02_lcd_i2c_write(adap, LCD_I2C_ADDR_LOWER, values, 2);
 
 	//pr_info("%s\n", __FUNCTION__);
 	values[0] = 0x29;
@@ -201,7 +239,7 @@ static struct resource nbx02_disp1_resources[] = {
 static struct tegra_dc_mode nbx02_panel_modes[] = {
 	{
 		.pclk = 48000000, /* Vsync freq. is 46HZ */
-		.h_ref_to_sync = 0,
+		.h_ref_to_sync = 1,
 		.v_ref_to_sync = 1,
 		.h_sync_width = 8,
 		.v_sync_width = 1,
@@ -211,6 +249,7 @@ static struct tegra_dc_mode nbx02_panel_modes[] = {
 		.v_active = 960,
 		.h_front_porch = 23,
 		.v_front_porch = 11,
+		.flags = TEGRA_DC_MODE_FLAG_NEG_V_SYNC | TEGRA_DC_MODE_FLAG_NEG_H_SYNC,
 	},
 };
 
@@ -274,13 +313,7 @@ static struct nvhost_device nbx02_disp1_device = {
 };
 
 static struct nvmap_platform_carveout nbx02_carveouts[] = {
-	[0] = {
-		.name		= "iram",
-		.usage_mask	= NVMAP_HEAP_CARVEOUT_IRAM,
-		.base		= TEGRA_IRAM_BASE,
-		.size		= TEGRA_IRAM_SIZE,
-		.buddy_size	= 0, /* no buddy allocation for IRAM */
-	},
+	[0] = NVMAP_HEAP_CARVEOUT_IRAM_INIT,
 	[1] = {
 		.name		= "generic-0",
 		.usage_mask	= NVMAP_HEAP_CARVEOUT_GENERIC,
@@ -303,7 +336,9 @@ static struct platform_device nbx02_nvmap_device = {
 
 static struct platform_device *nbx02_gfx_devices[] __initdata = {
 	&nbx02_nvmap_device,
+#ifdef CONFIG_TEGRA_GRHOST
 	&tegra_grhost_device,
+#endif
 	&tegra_pwfm0_device,
 	&tegra_pwfm1_device,
 	&nbx02_backlight_device,

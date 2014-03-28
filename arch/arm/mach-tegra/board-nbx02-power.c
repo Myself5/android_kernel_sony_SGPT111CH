@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * Copyright (C) 2010 NVIDIA, Inc.
  *
@@ -23,7 +23,6 @@
 #include <linux/regulator/machine.h>
 #include <linux/mfd/tps6586x.h>
 #include <linux/gpio.h>
-#include <mach/suspend.h>
 #include <linux/io.h>
 #include <linux/err.h>
 
@@ -34,23 +33,13 @@
 
 #include "gpio-names.h"
 #include "fuse.h"
-#include "power.h"
+#include "pm.h"
 #include "wakeups-t2.h"
 #include "board.h"
 #include "board-nbx02.h"
 
 #define PMC_CTRL		0x0
 #define PMC_CTRL_INTR_LOW	(1 << 17)
-
-#define CHARGING_DISABLE	TEGRA_GPIO_PR6
-
-int __init nbx02_charge_init(void)
-{
-	gpio_request(CHARGING_DISABLE, "chg_disable");
-	gpio_direction_output(CHARGING_DISABLE, 0);
-	tegra_gpio_enable(CHARGING_DISABLE);
-	return 0;
-}
 
 static struct regulator_consumer_supply tps658621_sm0_supply[] = {
 	REGULATOR_SUPPLY("vdd_core", NULL),
@@ -123,6 +112,7 @@ static struct regulator_consumer_supply tps658621_ldortc_supply[] = {
  */
 static struct tps6586x_settings sm1_config = {
 	.sm_pwm_mode = PWM_ONLY,
+	.slew_rate = SLEW_RATE_7040UV_PER_SEC,  /* POR default */
 };
 
 #define REGULATOR_INIT(_id, _minmv, _maxmv, on, config)			\
@@ -130,13 +120,13 @@ static struct tps6586x_settings sm1_config = {
 		.constraints = {					\
 			.min_uV = (_minmv)*1000,			\
 			.max_uV = (_maxmv)*1000,			\
-			.apply_uV = 1,					\
 			.valid_modes_mask = (REGULATOR_MODE_NORMAL |	\
 					     REGULATOR_MODE_STANDBY),	\
 			.valid_ops_mask = (REGULATOR_CHANGE_MODE |	\
 					   REGULATOR_CHANGE_STATUS |	\
 					   REGULATOR_CHANGE_VOLTAGE),	\
 			.always_on = on,				\
+			.apply_uV = 1,					\
 		},							\
 		.num_consumer_supplies = ARRAY_SIZE(tps658621_##_id##_supply),\
 		.consumer_supplies = tps658621_##_id##_supply,		\
@@ -159,7 +149,7 @@ static struct regulator_init_data ldo6_data = REGULATOR_INIT(ldo6, 3300, 3300, O
 static struct regulator_init_data ldo7_data = REGULATOR_INIT(ldo7, 2850, 2850, ON, NULL); /* keep on (workaround) */
 static struct regulator_init_data ldo8_data = REGULATOR_INIT(ldo8, 2850, 2850, OFF, NULL);
 static struct regulator_init_data ldo9_data = REGULATOR_INIT(ldo9, 3300, 3300, OFF, NULL); /* not used */
-static struct regulator_init_data ldortc_data = REGULATOR_INIT(ldortc, 3100, 3100, ON, NULL);
+static struct regulator_init_data ldortc_data = REGULATOR_INIT(ldortc, 2850, 2850, ON, NULL);
 
 static struct tps6586x_rtc_platform_data rtc_data = {
 	.irq = TEGRA_NR_IRQS + TPS6586X_INT_RTC_ALM1,
@@ -168,7 +158,7 @@ static struct tps6586x_rtc_platform_data rtc_data = {
 		.month = 1,
 		.day = 1,
 	},
-	.cl_sel = TPS6586X_RTC_CL_SEL_1_5PF /* use lowest (external 20pF cap) */
+	.cl_sel = TPS6586X_RTC_CL_SEL_7_5PF,
 };
 
 #define TPS_REG(_id, _data)			\
@@ -225,13 +215,8 @@ static struct tegra_suspend_platform_data nbx02_suspend_data = {
 	.suspend_mode	= TEGRA_SUSPEND_LP0,
 	.core_timer	= 0x7e7e,
 	.core_off_timer = 0xf,
-	.separate_req	= true,
 	.corereq_high	= false,
 	.sysclkreq_high	= true,
-	.wake_enb	= TEGRA_WAKE_GPIO_PJ7 | TEGRA_WAKE_USB1_VBUS,
-	.wake_high	= TEGRA_WAKE_USB1_VBUS,
-	.wake_low	= TEGRA_WAKE_GPIO_PJ7,
-	.wake_any	= 0,
 };
 
 int __init nbx02_regulator_init(void)

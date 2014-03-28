@@ -4,14 +4,12 @@ comment "NVIDIA Tegra Display Driver options"
 
 config TEGRA_GRHOST
 	tristate "Tegra graphics host driver"
-	depends on TEGRA_IOVMM
-        default n
 	help
 	  Driver for the Tegra graphics host hardware.
 
 config TEGRA_DC
 	tristate "Tegra Display Contoller"
-	depends on ARCH_TEGRA
+	depends on ARCH_TEGRA && TEGRA_GRHOST
 	select FB_MODE_HELPERS
 	select I2C
 	help
@@ -19,8 +17,7 @@ config TEGRA_DC
 
 config TEGRA_OVERLAY
 	tristate "Tegra Overlay Device Node"
-	depends on TEGRA_DC
-	default y
+	depends on TEGRA_DC && !TEGRA_DC_EXTENSIONS
 	help
 	  Device node for multi-client overlay support.
 
@@ -33,6 +30,14 @@ config FB_TEGRA
 	default FB
 	help
 	  Framebuffer device support for the Tegra display controller.
+
+config TEGRA_DC_EXTENSIONS
+	bool "Tegra Display Controller Extensions"
+	depends on TEGRA_DC
+	default y
+	help
+	  This exposes support for extended capabilities of the Tegra display
+	  controller to userspace drivers.
 
 config TEGRA_NVMAP
 	bool "Tegra GPU memory management driver (nvmap)"
@@ -86,28 +91,35 @@ config NVMAP_CARVEOUT_COMPACTOR
 	  heap and retries the failed allocation.
 	  Say Y here to let nvmap to keep carveout fragmentation under control.
 
-config NVMAP_SEARCH_GLOBAL_HANDLES
-	bool "Check global handle list when generating memory IDs"
+
+config NVMAP_VPR
+	bool "Enable VPR Heap."
 	depends on TEGRA_NVMAP
 	default n
 	help
-	  Say Y here to allow the system to search through memory handles not
-	  owned by the caller when generating a memory ID.  This shouldn't be
-	  necessary for well-written applications, but is provided for
-	  compatibility with legacy applications.
-	  If unsure, say N.
-
-config TEGRA_ENABLE_SUPPORT_FOR_1080p_30HZ
-	bool "Enable support for 1080p @ 30Hz"
-	default n
-	help
-	  Say Y here to Enable 1080p@30Hz instead of 1080p@60Hz
-	  If unsure, say N.
+	  Say Y here to enable Video Protection Region(VPR) heap.
+	  if unsure, say N.
 
 config TEGRA_DSI
 	bool "Enable DSI panel."
 	default n
 	help
 	  Say Y here to enable the DSI panel.
+
+config NVMAP_CONVERT_CARVEOUT_TO_IOVMM
+	bool "Convert carveout to IOVMM"
+	depends on TEGRA_NVMAP && TEGRA_IOVMM_SMMU
+	default y
+	help
+	  Say Y here to force to convert carveout memory requests to
+	  I/O virtual memory requests.
+
+config TEGRA_NVHDCP
+	bool "Support NVHDCP content protection on HDMI"
+	default n
+	help
+	  Say Y here to support NVHDCP upstream and downstream protocols, this
+	  requires a correctly fused chip to negotiate keys.
+
 endif
 

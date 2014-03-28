@@ -30,15 +30,13 @@
 #define TTB_IRGN_WT	((1 << 0) | (0 << 6))
 #define TTB_IRGN_WB	((1 << 0) | (1 << 6))
 
-#ifndef CONFIG_SMP
 /* PTWs cacheable, inner WB not shareable, outer WB not shareable */
-#define TTB_FLAGS	TTB_IRGN_WB|TTB_RGN_OC_WB
-#define PMD_FLAGS	PMD_SECT_WB
-#else
+#define TTB_FLAGS_UP	TTB_IRGN_WB|TTB_RGN_OC_WB
+#define PMD_FLAGS_UP	PMD_SECT_WB
+
 /* PTWs cacheable, inner WBWA shareable, outer WBWA not shareable */
-#define TTB_FLAGS	TTB_IRGN_WBWA|TTB_S|TTB_NOS|TTB_RGN_OC_WBWA
-#define PMD_FLAGS	PMD_SECT_WBWA|PMD_SECT_S
-#endif
+#define TTB_FLAGS_SMP	TTB_IRGN_WBWA|TTB_S|TTB_NOS|TTB_RGN_OC_WBWA
+#define PMD_FLAGS_SMP	PMD_SECT_WBWA|PMD_SECT_S
 
 ENTRY(cpu_v7_proc_init)
 	mov	pc, lr
@@ -105,14 +103,21 @@ ENTRY(cpu_v7_switch_mm)
 #ifdef CONFIG_MMU
 	mov	r2, #0
 	ldr	r1, [r1, #MM_CONTEXT_ID]	@ get mm->context.id
-	orr	r0, r0, #TTB_FLAGS
+	ALT_SMP(orr	r0, r0, #TTB_FLAGS_SMP)
+	ALT_UP(orr	r0, r0, #TTB_FLAGS_UP)
 #ifdef CONFIG_ARM_ERRATA_430973
 	mcr	p15, 0, r2, c7, c5, 6		@ flush BTAC/BTB
+#endif
+#ifdef CONFIG_ARM_ERRATA_754322
+	dsb
 #endif
 	mcr	p15, 0, r2, c13, c0, 1		@ set reserved context ID
 	isb
 1:	mcr	p15, 0, r0, c2, c0, 0		@ set TTB 0
 	isb
+#ifdef CONFIG_ARM_ERRATA_754322
+	dsb
+#endif
 	mcr	p15, 0, r1, c13, c0, 1		@ set context ID
 	isb
 #endif
@@ -125,15 +130,13 @@ ENDPROC(cpu_v7_switch_mm)
  *	Set a level 2 translation table entry.
  *
  *	- ptep  - pointer to level 2 translation table entry
- *		  (hardware version is stored at -1024 bytes)
+ *		  (hardware version is stored at +2048 bytes)
  *	- pte   - PTE value to store
  *	- ext	- value for extended PTE bits
  */
 ENTRY(cpu_v7_set_pte_ext)
 #ifdef CONFIG_MMU
- ARM(	str	r1, [r0], #-2048	)	@ linux version
- THUMB(	str	r1, [r0]		)	@ linux version
- THUMB(	sub	r0, r0, #2048		)
+	str	r1, [r0]			@ linux version
 
 	bic	r3, r1, #0x000003f0
 	bic	r3, r3, #PTE_TYPE_MASK
@@ -143,24 +146,31 @@ ENTRY(cpu_v7_set_pte_ext)
 	tst	r1, #1 << 4
 	orrne	r3, r3, #PTE_EXT_TEX(1)
 
-	tst	r1, #L_PTE_WRITE
-	tstne	r1, #L_PTE_DIRTY
-	orreq	r3, r3, #PTE_EXT_APX
+	eor	r1, r1, #L_PTE_DIRTY
+	tst	r1, #L_PTE_RDONLY | L_PTE_DIRTY
+	orrne	r3, r3, #PTE_EXT_APX
 
 	tst	r1, #L_PTE_USER
 	orrne	r3, r3, #PTE_EXT_AP1
+#ifdef CONFIG_CPU_USE_DOMAINS
+	@ allow kernel read/write access to read-only user pages
 	tstne	r3, #PTE_EXT_APX
 	bicne	r3, r3, #PTE_EXT_APX | PTE_EXT_AP0
+#endif
 
-	tst	r1, #L_PTE_EXEC
-	orreq	r3, r3, #PTE_EXT_XN
+	tst	r1, #L_PTE_XN
+	orrne	r3, r3, #PTE_EXT_XN
 
 	tst	r1, #L_PTE_YOUNG
 	tstne	r1, #L_PTE_PRESENT
 	moveq	r3, #0
 
-	str	r3, [r0]
-	mcr	p15, 0, r0, c7, c10, 1		@ flush_pte
+ ARM(	str	r3, [r0, #2048]! )
+ THUMB(	add	r0, r0, #2048 )
+ THUMB(	str	r3, [r0] )
+	mrc     p15, 0, r3, c0, c1, 7           @ read ID_MMFR3
+	tst     r3, #0xf << 20                  @ check the coherent walk bits
+	mcreq   p15, 0, r0, c7, c10, 1          @ flush_pte
 #endif
 	mov	pc, lr
 ENDPROC(cpu_v7_set_pte_ext)
@@ -169,7 +179,256 @@ cpu_v7_name:
 	.ascii	"ARMv7 Processor"
 	.align
 
-	__INIT
+	/*
+	 * Memory region attributes with SCTLR.TRE=1
+	 *
+	 *   n = TEX[0],C,B
+	 *   TR = PRRR[2n+1:2n]		- memory type
+	 *   IR = NMRR[2n+1:2n]		- inner cacheable property
+	 *   OR = NMRR[2n+17:2n+16]	- outer cacheable property
+	 *
+	 *			n	TR	IR	OR
+	 *   UNCACHED		000	00
+	 *   BUFFERABLE		001	10	00	00
+	 *   WRITETHROUGH	010	10	10	10
+	 *   WRITEBACK		011	10	11	11
+	 *   reserved		110
+	 *   WRITEALLOC		111	10	01	01
+	 *   DEV_SHARED		100	01
+	 *   DEV_NONSHARED	100	01
+	 *   DEV_WC		001	10
+	 *   DEV_CACHED		011	10
+	 *
+	 * Other attributes:
+	 *
+	 *   DS0 = PRRR[16] = 0		- device shareable property
+	 *   DS1 = PRRR[17] = 1		- device shareable property
+	 *   NS0 = PRRR[18] = 0		- normal shareable property
+	 *   NS1 = PRRR[19] = 1		- normal shareable property
+	 *   NOS = PRRR[24+n] = 1	- not outer shareable
+	 */
+.equ	PRRR,	0xff0a89a8
+.equ	NMRR,	0xc0e044e0
+
+/* Suspend/resume support: derived from arch/arm/mach-s5pv210/sleep.S */
+.globl	cpu_v7_suspend_size
+.equ	cpu_v7_suspend_size, (4 * (10 + 4 + (16 * 2) + (16 * 2)))
+/* 9 CP15 registers
+ * 4 CP14 registers
+ * 16x2 CP14 breakpoint registers (maximum)
+ * 16x2 CP14 watchpoint registers (maximum)
+ */
+
+.macro  save_brkpt cm
+	mrc	p14, 0, r4, c0, \cm, 4
+	mrc	p14, 0, r5, c0, \cm, 5
+	stmia	r0!, {r4 - r5}
+.endm
+
+.macro  restore_brkpt cm
+	ldmia	r0!, {r4 - r5}
+	mcr	p14, 0, r4, c0, \cm, 4
+	mcr	p14, 0, r5, c0, \cm, 5
+.endm
+
+.macro  save_wpt cm
+	mrc	p14, 0, r4, c0, \cm, 6
+	mrc	p14, 0, r5, c0, \cm, 7
+	stmia	r0!, {r4 - r5}
+.endm
+
+.macro  restore_wpt cm
+	ldmia	r0!, {r4 - r5}
+	mcr	p14, 0, r4, c0, \cm, 6
+	mcr	p14, 0, r5, c0, \cm, 7
+.endm
+
+#ifdef CONFIG_PM_SLEEP
+ENTRY(cpu_v7_do_suspend)
+	stmfd	sp!, {r0, r2 - r11, lr}
+	mrc	p15, 0, r2, c13, c0, 3	@ User r/o thread ID
+	mrc	p15, 0, r3, c15, c0, 1	@ diag
+	mrc	p15, 0, r4, c13, c0, 0	@ FCSE/PID
+	mrc	p15, 0, r5, c13, c0, 1	@ Context ID
+	mrc	p15, 0, r6, c3, c0, 0	@ Domain ID
+	mrc	p15, 0, r7, c2, c0, 0	@ TTB 0
+	mrc	p15, 0, r8, c2, c0, 1	@ TTB 1
+	mrc	p15, 0, r9, c1, c0, 0	@ Control register
+	mrc	p15, 0, r10, c1, c0, 1	@ Auxiliary control register
+	mrc	p15, 0, r11, c1, c0, 2	@ Co-processor access control
+	stmia	r0!, {r2 - r11}
+
+	/* Save CP14 debug controller context */
+	mrc	p14, 0, r4, c0, c1, 0	@ DSCR
+	mrc	p14, 0, r5, c0, c6, 0	@ WFAR
+	mrc	p14, 0, r6, c0, c7, 0	@ VCR
+	mrc	p14, 0, r7, c7, c9, 6	@ CLAIM
+	stmia	r0!, {r4-r7}
+
+	mrc	p14, 0, r8, c0, c0, 0   @ read IDR
+	mov	r3, r8, lsr #24
+	and	r3, r3, #0xf            @ r3 has the number of brkpt
+	rsb	r3, r3, #0xf
+
+	/* r3 = (15 - #of brkpt) ;
+	   switch offset = r3*12 - 4 = (r3*3 - 1)<<2
+	*/
+	add	r3, r3, r3, lsl #1
+	sub	r3, r3, #1
+	add	pc, pc, r3, lsl #2
+
+	save_brkpt	c15
+	save_brkpt	c14
+	save_brkpt	c13
+	save_brkpt	c12
+	save_brkpt	c11
+	save_brkpt	c10
+	save_brkpt	c9
+	save_brkpt	c8
+	save_brkpt	c7
+	save_brkpt	c6
+	save_brkpt	c5
+	save_brkpt	c4
+	save_brkpt	c3
+	save_brkpt	c2
+	save_brkpt	c1
+	save_brkpt	c0
+
+	mov	r3, r8, lsr #28         @ r3 has the number of wpt
+	rsb	r3, r3, #0xf
+
+	/* r3 = (15 - #of wpt) ;
+	   switch offset = r3*12 - 4 = (r3*3 - 1)<<2
+	*/
+	add	r3, r3, r3, lsl #1
+	sub	r3, r3, #1
+	add	pc, pc, r3, lsl #2
+
+	save_wpt	c15
+	save_wpt	c14
+	save_wpt	c13
+	save_wpt	c12
+	save_wpt	c11
+	save_wpt	c10
+	save_wpt	c9
+	save_wpt	c8
+	save_wpt	c7
+	save_wpt	c6
+	save_wpt	c5
+	save_wpt	c4
+	save_wpt	c3
+	save_wpt	c2
+	save_wpt	c1
+	save_wpt	c0
+
+	ldmfd	sp!, {r0, r2 - r11, pc}
+ENDPROC(cpu_v7_do_suspend)
+
+ENTRY(cpu_v7_do_resume)
+	mov	ip, #0
+	mcr	p15, 0, ip, c8, c7, 0	@ invalidate TLBs
+	mcr	p15, 0, ip, c7, c5, 0	@ invalidate I cache
+	ldmia	r0!, {r2 - r11}
+	mcr	p15, 0, r2, c13, c0, 3	@ User r/o thread ID
+#ifndef CONFIG_TRUSTED_FOUNDATIONS
+	mcr	p15, 0, r3, c15, c0, 1	@ diag
+#endif
+	mcr	p15, 0, r4, c13, c0, 0	@ FCSE/PID
+	mcr	p15, 0, r5, c13, c0, 1	@ Context ID
+	mcr	p15, 0, r6, c3, c0, 0	@ Domain ID
+	mcr	p15, 0, r7, c2, c0, 0	@ TTB 0
+	mcr	p15, 0, r8, c2, c0, 1	@ TTB 1
+	mcr	p15, 0, ip, c2, c0, 2	@ TTB control register
+	mcr	p15, 0, r10, c1, c0, 1	@ Auxiliary control register
+	mcr	p15, 0, r11, c1, c0, 2	@ Co-processor access control
+	ldr	r4, =PRRR		@ PRRR
+	ldr	r5, =NMRR		@ NMRR
+	mcr	p15, 0, r4, c10, c2, 0	@ write PRRR
+	mcr	p15, 0, r5, c10, c2, 1	@ write NMRR
+	isb
+
+	/* Restore CP14 debug controller context */
+
+	ldmia	r0!, {r2 - r5}
+	mcr	p14, 0, r3, c0, c6, 0	@ WFAR
+	mcr	p14, 0, r4, c0, c7, 0	@ VCR
+	mcr	p14, 0, r5, c7, c8, 6	@ CLAIM
+
+	mrc	p14, 0, r8, c0, c0, 0   @ read IDR
+	mov	r3, r8, lsr #24
+	and	r3, r3, #0xf            @ r3 has the number of brkpt
+	rsb	r3, r3, #0xf
+
+	/* r3 = (15 - #of wpt) ;
+	   switch offset = r3*12 - 4 = (r3*3 - 1)<<2
+	*/
+	add     r3, r3, r3, lsl #1
+	sub	r3, r3, #1
+	add	pc, pc, r3, lsl #2
+
+	restore_brkpt	c15
+	restore_brkpt	c14
+	restore_brkpt	c13
+	restore_brkpt	c12
+	restore_brkpt	c11
+	restore_brkpt	c10
+	restore_brkpt	c9
+	restore_brkpt	c8
+	restore_brkpt	c7
+	restore_brkpt	c6
+	restore_brkpt	c5
+	restore_brkpt	c4
+	restore_brkpt	c3
+	restore_brkpt	c2
+	restore_brkpt	c1
+	restore_brkpt	c0
+
+	mov	r3, r8, lsr #28         @ r3 has the number of wpt
+	rsb	r3, r3, #0xf
+
+	/* r3 = (15 - #of wpt) ;
+	   switch offset = r3*12 - 4 = (r3*3 - 1)<<2
+	*/
+	add     r3, r3, r3, lsl #1
+	sub	r3, r3, #1
+	add	pc, pc, r3, lsl #2
+
+start_restore_wpt:
+	restore_wpt	c15
+	restore_wpt	c14
+	restore_wpt	c13
+	restore_wpt	c12
+	restore_wpt	c11
+	restore_wpt	c10
+	restore_wpt	c9
+	restore_wpt	c8
+	restore_wpt	c7
+	restore_wpt	c6
+	restore_wpt	c5
+	restore_wpt	c4
+	restore_wpt	c3
+	restore_wpt	c2
+	restore_wpt	c1
+	restore_wpt	c0
+	isb
+
+	mcr	p14, 0, r2, c0, c2, 2	@ DSCR
+	isb
+	mov	r0, r9			@ control register
+	mov	r2, r7, lsr #14		@ get TTB0 base
+	mov	r2, r2, lsl #14
+	ldr	r3, cpu_resume_l1_flags
+	b	cpu_resume_mmu
+ENDPROC(cpu_v7_do_resume)
+cpu_resume_l1_flags:
+	ALT_SMP(.long PMD_TYPE_SECT | PMD_SECT_AP_WRITE | PMD_FLAGS_SMP)
+	ALT_UP(.long  PMD_TYPE_SECT | PMD_SECT_AP_WRITE | PMD_FLAGS_UP)
+#else
+#define cpu_v7_do_suspend	0
+#define cpu_v7_do_resume	0
+#endif
+
+	__CPUINIT
 
 /*
  *	__v7_setup
@@ -188,7 +447,8 @@ cpu_v7_name:
  */
 __v7_ca9mp_setup:
 #ifdef CONFIG_SMP
-	mrc	p15, 0, r0, c1, c0, 1
+	ALT_SMP(mrc	p15, 0, r0, c1, c0, 1)
+	ALT_UP(mov	r0, #(1 << 6))		@ fake it for UP
 	tst	r0, #(1 << 6)			@ SMP/nAMP mode enabled?
 	orreq	r0, r0, #(1 << 6) | (1 << 0)	@ Enable SMP/nAMP mode and
 	mcreq	p15, 0, r0, c1, c0, 1		@ TLB ops broadcasting
@@ -239,7 +499,6 @@ __v7_setup:
 	teq	r0, r10
 	bne	3f
 #ifndef CONFIG_TRUSTED_FOUNDATIONS
-    /* c15,c0,0: read and write in Secure privileged modes, read only in Non-secure state. */
 	cmp	r6, #0x10			@ power ctrl reg added r1p0
 	mrcge	p15, 0, r10, c15, c0, 0		@ read power control register
 	orrge	r10, r10, #1			@ enable dynamic clock gating
@@ -250,9 +509,7 @@ __v7_setup:
 	orreq	r10, r10, #0x30			@ disable core clk gate on
 	mcreq	p15, 0, r10, c15, c0, 2		@ instr-side waits
 #endif
-#endif
-
-#if defined(CONFIG_ARM_ERRATA_742230) && !defined(CONFIG_TRUSTED_FOUNDATIONS)
+#ifdef CONFIG_ARM_ERRATA_742230
 	cmp	r6, #0x22			@ only present up to r2p2
 	mrcle	p15, 0, r10, c15, c0, 1		@ read diagnostic register
 	orrle	r10, r10, #1 << 4		@ set bit #4
@@ -271,9 +528,24 @@ __v7_setup:
 	teq	r6, #0x20			@ present in r2p0
 	teqne	r6, #0x21			@ present in r2p1
 	teqne	r6, #0x22			@ present in r2p2
+	teqne	r6, #0x27			@ present in r2p7
+	teqne	r6, #0x29			@ present in r2p9
 	mrceq	p15, 0, r10, c15, c0, 1		@ read diagnostic register
 	orreq	r10, r10, #1 << 6		@ set bit #6
 	mcreq	p15, 0, r10, c15, c0, 1		@ write diagnostic register
+#endif
+#ifdef CONFIG_ARM_ERRATA_751472
+	cmp	r6, #0x30			@ present prior to r3p0
+	mrclt	p15, 0, r10, c15, c0, 1		@ read diagnostic register
+	orrlt	r10, r10, #1 << 11		@ set bit #11
+	mcrlt	p15, 0, r10, c15, c0, 1		@ write diagnostic register
+#endif
+#ifdef CONFIG_ARM_ERRATA_752520
+	cmp	r6, #0x29			@ present prior to r2p9
+	mrclt	p15, 0, r10, c15, c0, 1		@ read diagnostic register
+	orrlt	r10, r10, #1 << 20		@ set bit #20
+	mcrlt	p15, 0, r10, c15, c0, 1		@ write diagnostic register
+#endif
 #endif
 
 3:	mov	r10, #0
@@ -284,44 +556,11 @@ __v7_setup:
 #ifdef CONFIG_MMU
 	mcr	p15, 0, r10, c8, c7, 0		@ invalidate I + D TLBs
 	mcr	p15, 0, r10, c2, c0, 2		@ TTB control register
-	orr	r4, r4, #TTB_FLAGS
+	ALT_SMP(orr	r4, r4, #TTB_FLAGS_SMP)
+	ALT_UP(orr	r4, r4, #TTB_FLAGS_UP)
 	mcr	p15, 0, r4, c2, c0, 1		@ load TTB1
-	mov	r10, #0x1f			@ domains 0, 1 = manager
-	mcr	p15, 0, r10, c3, c0, 0		@ load domain access register
-	/*
-	 * Memory region attributes with SCTLR.TRE=1
-	 *
-	 *   n = TEX[0],C,B
-	 *   TR = PRRR[2n+1:2n]		- memory type
-	 *   IR = NMRR[2n+1:2n]		- inner cacheable property
-	 *   OR = NMRR[2n+17:2n+16]	- outer cacheable property
-	 *
-	 *			n	TR	IR	OR
-	 *   UNCACHED		000	00
-	 *   BUFFERABLE		001	10	00	00
-	 *   WRITETHROUGH	010	10	10	10
-	 *   WRITEBACK		011	10	11	11
-	 *   reserved		110
-	 *   WRITEALLOC		111	10	01	01
-	 *   DEV_SHARED		100	01
-	 *   DEV_NONSHARED	100	01
-	 *   DEV_WC		001	10
-	 *   DEV_CACHED		011	10
-	 *
-	 * Other attributes:
-	 *
-	 *   DS0 = PRRR[16] = 0		- device shareable property
-	 *   DS1 = PRRR[17] = 1		- device shareable property
-	 *   NS0 = PRRR[18] = 0		- normal shareable property
-	 *   NS1 = PRRR[19] = 1		- normal shareable property
-	 *   NOS = PRRR[24+n] = 1	- not outer shareable
-	 */
-	ldr	r5, =0xff0a89a8			@ PRRR
-#ifdef CONFIG_SMP
-	ldr	r6, =0xc0e0c4e0			@ NMRR
-#else
-	ldr	r6, =0x40e044e0
-#endif
+	ldr	r5, =PRRR			@ PRRR
+	ldr	r6, =NMRR			@ NMRR
 	mcr	p15, 0, r5, c10, c2, 0		@ write PRRR
 	mcr	p15, 0, r6, c10, c2, 1		@ write NMRR
 #endif
@@ -329,6 +568,10 @@ __v7_setup:
 	ldmia	r5, {r5, r6}
 #ifdef CONFIG_CPU_ENDIAN_BE8
 	orr	r6, r6, #1 << 25		@ big-endian page tables
+#endif
+#ifdef CONFIG_SWP_EMULATE
+	orr     r5, r5, #(1 << 10)              @ set SW bit in "clear"
+	bic     r6, r6, #(1 << 10)              @ clear it in "mmuset"
 #endif
    	mrc	p15, 0, r0, c1, c0, 0		@ read control register
 	bic	r0, r0, r5			@ clear bits them
@@ -350,6 +593,8 @@ v7_crval:
 __v7_setup_stack:
 	.space	4 * 11				@ 11 registers
 
+	__INITDATA
+
 	.type	v7_processor_functions, #object
 ENTRY(v7_processor_functions)
 	.word	v7_early_abort
@@ -361,7 +606,12 @@ ENTRY(v7_processor_functions)
 	.word	cpu_v7_dcache_clean_area
 	.word	cpu_v7_switch_mm
 	.word	cpu_v7_set_pte_ext
+	.word	0
+	.word	0
+	.word	0
 	.size	v7_processor_functions, . - v7_processor_functions
+
+	.section ".rodata"
 
 	.type	cpu_arch_name, #object
 cpu_arch_name:
@@ -380,15 +630,21 @@ cpu_elf_name:
 __v7_ca9mp_proc_info:
 	.long	0x410fc090		@ Required ID value
 	.long	0xff0ffff0		@ Mask for ID
-	.long   PMD_TYPE_SECT | \
+	ALT_SMP(.long \
+		PMD_TYPE_SECT | \
 		PMD_SECT_AP_WRITE | \
 		PMD_SECT_AP_READ | \
-		PMD_FLAGS
+		PMD_FLAGS_SMP)
+	ALT_UP(.long \
+		PMD_TYPE_SECT | \
+		PMD_SECT_AP_WRITE | \
+		PMD_SECT_AP_READ | \
+		PMD_FLAGS_UP)
 	.long   PMD_TYPE_SECT | \
 		PMD_SECT_XN | \
 		PMD_SECT_AP_WRITE | \
 		PMD_SECT_AP_READ
-	b	__v7_ca9mp_setup
+	W(b)	__v7_ca9mp_setup
 	.long	cpu_arch_name
 	.long	cpu_elf_name
 	.long	HWCAP_SWP|HWCAP_HALF|HWCAP_THUMB|HWCAP_FAST_MULT|HWCAP_EDSP|HWCAP_TLS
@@ -406,15 +662,21 @@ __v7_ca9mp_proc_info:
 __v7_proc_info:
 	.long	0x000f0000		@ Required ID value
 	.long	0x000f0000		@ Mask for ID
-	.long   PMD_TYPE_SECT | \
+	ALT_SMP(.long \
+		PMD_TYPE_SECT | \
 		PMD_SECT_AP_WRITE | \
 		PMD_SECT_AP_READ | \
-		PMD_FLAGS
+		PMD_FLAGS_SMP)
+	ALT_UP(.long \
+		PMD_TYPE_SECT | \
+		PMD_SECT_AP_WRITE | \
+		PMD_SECT_AP_READ | \
+		PMD_FLAGS_UP)
 	.long   PMD_TYPE_SECT | \
 		PMD_SECT_XN | \
 		PMD_SECT_AP_WRITE | \
 		PMD_SECT_AP_READ
-	b	__v7_setup
+	W(b)	__v7_setup
 	.long	cpu_arch_name
 	.long	cpu_elf_name
 	.long	HWCAP_SWP|HWCAP_HALF|HWCAP_THUMB|HWCAP_FAST_MULT|HWCAP_EDSP|HWCAP_TLS

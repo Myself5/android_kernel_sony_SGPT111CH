@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.
@@ -16,6 +16,8 @@
 #include <linux/types.h>
 
 u32 nbx_get_odmdata(void);
+
+void nbx_ecipc_irq_setup(int gpio_num, int irqf_trigger);
 
 #endif /* _BOARD_NBX_COMMON_H */
 

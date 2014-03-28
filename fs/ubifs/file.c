@@ -433,8 +433,9 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 	struct page *page;
 
 	ubifs_assert(ubifs_inode(inode)->ui_size == inode->i_size);
+	ubifs_assert(!c->ro_media && !c->ro_mount);
 
-	if (unlikely(c->ro_media))
+	if (unlikely(c->ro_error))
 		return -EROFS;
 
 	/* Try out the fast-path part first */
@@ -447,10 +448,12 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 		if (!(pos & ~PAGE_CACHE_MASK) && len == PAGE_CACHE_SIZE) {
 			/*
 			 * We change whole page so no need to load it. But we
-			 * have to set the @PG_checked flag to make the further
-			 * code know that the page is new. This might be not
-			 * true, but it is better to budget more than to read
-			 * the page from the media.
+			 * do not know whether this page exists on the media or
+			 * not, so we assume the latter because it requires
+			 * larger budget. The assumption is that it is better
+			 * to budget a bit more than to read the page from the
+			 * media. Thus, we are setting the @PG_checked flag
+			 * here.
 			 */
 			SetPageChecked(page);
 			skipped_read = 1;
@@ -558,6 +561,7 @@ static int ubifs_write_end(struct file *file, struct address_space *mapping,
 		dbg_gen("copied %d instead of %d, read page and repeat",
 			copied, len);
 		cancel_budget(c, page, ui, appending);
+		ClearPageChecked(page);
 
 		/*
 		 * Return 0 to force VFS to repeat the whole operation, or the
@@ -1308,6 +1312,9 @@ int ubifs_fsync(struct file *file, int datasync)
 
 	dbg_gen("syncing inode %lu", inode->i_ino);
 
+	if (inode->i_sb->s_flags & MS_RDONLY)
+		return 0;
+
 	/*
 	 * VFS has already synchronized dirty pages for this inode. Synchronize
 	 * the inode unless this is a 'datasync()' call.
@@ -1439,9 +1446,9 @@ static int ubifs_vm_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vm
 
 	dbg_gen("ino %lu, pg %lu, i_size %lld",	inode->i_ino, page->index,
 		i_size_read(inode));
-	ubifs_assert(!(inode->i_sb->s_flags & MS_RDONLY));
+	ubifs_assert(!c->ro_media && !c->ro_mount);
 
-	if (unlikely(c->ro_media))
+	if (unlikely(c->ro_error))
 		return VM_FAULT_SIGBUS; /* -EROFS */
 
 	/*

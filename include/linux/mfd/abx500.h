@@ -6,8 +6,7 @@
  *
  * ABX500 core access functions.
  * The abx500 interface is used for the Analog Baseband chip
- * ab3100, ab3550, ab5500 and possibly comming. It is not used for
- * ab4500 and ab8500 since they are another family of chip.
+ * ab3100, ab3550, ab5500, and ab8500.
  *
  * Author: Mattias Wallin <mattias.wallin@stericsson.com>
  * Author: Mattias Nilsson <mattias.i.nilsson@stericsson.com>
@@ -187,7 +186,6 @@ struct abx500_init_settings {
 struct ab3550_platform_data {
 	struct {unsigned int base; unsigned int count; } irq;
 	void *dev_data[AB3550_NUM_DEVICES];
-	size_t dev_data_sz[AB3550_NUM_DEVICES];
 	struct abx500_init_settings *init_settings;
 	unsigned int init_settings_sz;
 };
@@ -230,4 +228,5 @@ struct abx500_ops {
 };
 
 int abx500_register_ops(struct device *core_dev, struct abx500_ops *ops);
+void abx500_remove_ops(struct device *dev);
 #endif

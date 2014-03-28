@@ -36,7 +36,6 @@
 #include <linux/list.h>
 #include <linux/freezer.h>
 #include <linux/jiffies.h>
-#include <linux/smp_lock.h>
 #include <linux/kthread.h>
 #include <asm/processor.h>
 
@@ -702,7 +701,7 @@ static void dvb_frontend_stop(struct dvb_frontend *fe)
 
 	kthread_stop(fepriv->thread);
 
-	init_MUTEX (&fepriv->sem);
+	sema_init(&fepriv->sem, 1);
 	fepriv->state = FESTATE_IDLE;
 
 	/* paranoia check in case a signal arrived */
@@ -1639,7 +1638,7 @@ static int dvb_frontend_ioctl_legacy(struct file *file,
 	case FE_READ_STATUS: {
 		fe_status_t* status = parg;
 
-		/* if retune was requested but hasn't occured yet, prevent
+		/* if retune was requested but hasn't occurred yet, prevent
 		 * that user get signal state from previous tuning */
 		if (fepriv->state == FESTATE_RETUNE ||
 		    fepriv->state == FESTATE_ERROR) {
@@ -1730,7 +1729,7 @@ static int dvb_frontend_ioctl_legacy(struct file *file,
 			 * Dish network legacy switches (as used by Dish500)
 			 * are controlled by sending 9-bit command words
 			 * spaced 8msec apart.
-			 * the actual command word is switch/port dependant
+			 * the actual command word is switch/port dependent
 			 * so it is up to the userspace application to send
 			 * the right command.
 			 * The command must always start with a '0' after
@@ -2034,7 +2033,8 @@ static const struct file_operations dvb_frontend_fops = {
 	.unlocked_ioctl	= dvb_generic_ioctl,
 	.poll		= dvb_frontend_poll,
 	.open		= dvb_frontend_open,
-	.release	= dvb_frontend_release
+	.release	= dvb_frontend_release,
+	.llseek		= noop_llseek,
 };
 
 int dvb_register_frontend(struct dvb_adapter* dvb,
@@ -2061,7 +2061,7 @@ int dvb_register_frontend(struct dvb_adapter* dvb,
 	}
 	fepriv = fe->frontend_priv;
 
-	init_MUTEX (&fepriv->sem);
+	sema_init(&fepriv->sem, 1);
 	init_waitqueue_head (&fepriv->wait_queue);
 	init_waitqueue_head (&fepriv->events.wait_queue);
 	mutex_init(&fepriv->events.mtx);

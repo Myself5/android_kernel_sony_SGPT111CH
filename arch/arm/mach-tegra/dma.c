@@ -3,7 +3,7 @@
  *
  * System DMA driver for NVIDIA Tegra SoCs
  *
- * Copyright (c) 2008-2009, NVIDIA Corporation.
+ * Copyright (c) 2008-2011, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,10 +27,12 @@
 #include <linux/err.h>
 #include <linux/irq.h>
 #include <linux/delay.h>
+#include <linux/clk.h>
+#include <linux/syscore_ops.h>
 #include <mach/dma.h>
 #include <mach/irqs.h>
 #include <mach/iomap.h>
-#include <mach/suspend.h>
+#include <mach/clk.h>
 
 #define APB_DMA_GEN				0x000
 #define GEN_ENABLE				(1<<31)
@@ -95,12 +97,17 @@
 #define APB_SEQ_WRAP_SHIFT			16
 #define APB_SEQ_WRAP_MASK			(0x7<<APB_SEQ_WRAP_SHIFT)
 
+#ifdef CONFIG_ARCH_TEGRA_2x_SOC
 #define TEGRA_SYSTEM_DMA_CH_NR			16
+#else
+#define TEGRA_SYSTEM_DMA_CH_NR			32
+#endif
 #define TEGRA_SYSTEM_DMA_AVP_CH_NUM		4
 #define TEGRA_SYSTEM_DMA_CH_MIN			0
 #define TEGRA_SYSTEM_DMA_CH_MAX	\
 	(TEGRA_SYSTEM_DMA_CH_NR - TEGRA_SYSTEM_DMA_AVP_CH_NUM - 1)
 
+static struct clk *dma_clk;
 const unsigned int ahb_addr_wrap_table[8] = {
 	0, 32, 64, 128, 256, 512, 1024, 2048
 };
@@ -115,6 +122,7 @@ struct tegra_dma_channel {
 	int			id;
 	spinlock_t		lock;
 	char			name[TEGRA_DMA_NAME_SIZE];
+	char			client_name[TEGRA_DMA_NAME_SIZE];
 	void  __iomem		*addr;
 	int			mode;
 	int			irq;
@@ -123,6 +131,7 @@ struct tegra_dma_channel {
 
 #define  NV_DMA_MAX_CHANNELS  32
 
+static bool tegra_dma_initialized;
 static DEFINE_MUTEX(tegra_dma_lock);
 static DEFINE_SPINLOCK(enable_lock);
 
@@ -188,6 +197,7 @@ int tegra_dma_cancel(struct tegra_dma_channel *ch)
 	spin_unlock_irqrestore(&ch->lock, irq_flags);
 	return 0;
 }
+EXPORT_SYMBOL(tegra_dma_cancel);
 
 static unsigned int get_channel_status(struct tegra_dma_channel *ch,
 			struct tegra_dma_req *req, bool is_stop_dma)
@@ -387,8 +397,8 @@ int tegra_dma_enqueue_req(struct tegra_dma_channel *ch,
 
 	list_for_each_entry(_req, &ch->list, node) {
 		if (req == _req) {
-		    spin_unlock_irqrestore(&ch->lock, irq_flags);
-		    return -EEXIST;
+			spin_unlock_irqrestore(&ch->lock, irq_flags);
+			return -EEXIST;
 		}
 	}
 
@@ -438,10 +448,26 @@ int tegra_dma_enqueue_req(struct tegra_dma_channel *ch,
 }
 EXPORT_SYMBOL(tegra_dma_enqueue_req);
 
-struct tegra_dma_channel *tegra_dma_allocate_channel(int mode)
+static void tegra_dma_dump_channel_usage(void)
+{
+	int i;
+	pr_info("DMA channel allocation dump:\n");
+	for (i = TEGRA_SYSTEM_DMA_CH_MIN; i <= TEGRA_SYSTEM_DMA_CH_MAX; i++) {
+		struct tegra_dma_channel *ch = &dma_channels[i];
+		pr_warn("dma %d used by %s\n", i, ch->client_name);
+	}
+	return;
+}
+
+struct tegra_dma_channel *tegra_dma_allocate_channel(int mode,
+		const char namefmt[], ...)
 {
 	int channel;
 	struct tegra_dma_channel *ch = NULL;
+	va_list args;
+
+	if (WARN_ON(!tegra_dma_initialized))
+		return NULL;
 
 	mutex_lock(&tegra_dma_lock);
 
@@ -452,14 +478,17 @@ struct tegra_dma_channel *tegra_dma_allocate_channel(int mode)
 		channel = find_first_zero_bit(channel_usage,
 			ARRAY_SIZE(dma_channels));
 		if (channel >= ARRAY_SIZE(dma_channels)) {
-			pr_err("%s: failed to allocate a DMA channel",
-				__func__);
+			tegra_dma_dump_channel_usage();
 			goto out;
 		}
 	}
 	__set_bit(channel, channel_usage);
 	ch = &dma_channels[channel];
 	ch->mode = mode;
+	va_start(args, namefmt);
+	vsnprintf(ch->client_name, sizeof(ch->client_name),
+		namefmt, args);
+	va_end(args);
 
 out:
 	mutex_unlock(&tegra_dma_lock);
@@ -474,6 +503,7 @@ void tegra_dma_free_channel(struct tegra_dma_channel *ch)
 	tegra_dma_cancel(ch);
 	mutex_lock(&tegra_dma_lock);
 	__clear_bit(ch->id, channel_usage);
+	memset(ch->client_name, 0, sizeof(ch->client_name));
 	mutex_unlock(&tegra_dma_lock);
 }
 EXPORT_SYMBOL(tegra_dma_free_channel);
@@ -526,11 +556,19 @@ static void tegra_dma_update_hw(struct tegra_dma_channel *ch,
 	csr = CSR_IE_EOC | CSR_FLOW;
 	ahb_seq = AHB_SEQ_INTR_ENB;
 
-	switch(req->req_sel) {
+	switch (req->req_sel) {
 	case TEGRA_DMA_REQ_SEL_SL2B1:
 	case TEGRA_DMA_REQ_SEL_SL2B2:
 	case TEGRA_DMA_REQ_SEL_SL2B3:
 	case TEGRA_DMA_REQ_SEL_SL2B4:
+#if !defined(CONFIG_ARCH_TEGRA_2x_SOC)
+	case TEGRA_DMA_REQ_SEL_SL2B5:
+	case TEGRA_DMA_REQ_SEL_SL2B6:
+	case TEGRA_DMA_REQ_SEL_APBIF_CH0:
+	case TEGRA_DMA_REQ_SEL_APBIF_CH1:
+	case TEGRA_DMA_REQ_SEL_APBIF_CH2:
+	case TEGRA_DMA_REQ_SEL_APBIF_CH3:
+#endif
 	case TEGRA_DMA_REQ_SEL_SPI:
 		/* For spi/slink the burst size based on transfer size
 		 * i.e. if multiple of 32 bytes then busrt is
@@ -543,6 +581,19 @@ static void tegra_dma_update_hw(struct tegra_dma_channel *ch,
 		else
 			ahb_seq |= AHB_SEQ_BURST_8;
 		break;
+
+#if defined(CONFIG_ARCH_TEGRA_2x_SOC)
+	case TEGRA_DMA_REQ_SEL_I2S_2:
+	case TEGRA_DMA_REQ_SEL_I2S_1:
+	case TEGRA_DMA_REQ_SEL_SPD_I:
+	case TEGRA_DMA_REQ_SEL_UI_I:
+	case TEGRA_DMA_REQ_SEL_I2S2_2:
+	case TEGRA_DMA_REQ_SEL_I2S2_1:
+		/* For ARCH_2x i2s/spdif burst size is 4 word */
+		ahb_seq |= AHB_SEQ_BURST_4;
+		break;
+#endif
+
 	default:
 		ahb_seq |= AHB_SEQ_BURST_1;
 		break;
@@ -689,16 +740,19 @@ static void handle_continuous_dbl_dma(struct tegra_dma_channel *ch)
 	if (req) {
 		if (req->buffer_status == TEGRA_DMA_REQ_BUF_STATUS_EMPTY) {
 			bool is_dma_ping_complete;
-			is_dma_ping_complete =
-				!!(readl(ch->addr + APB_DMA_CHAN_STA) &
-					STA_PING_PONG);
+			is_dma_ping_complete = (readl(ch->addr + APB_DMA_CHAN_STA)
+						& STA_PING_PONG) ? true : false;
 			if (req->to_memory)
 				is_dma_ping_complete = !is_dma_ping_complete;
 			/* Out of sync - Release current buffer */
 			if (!is_dma_ping_complete) {
-				req->buffer_status =
-						TEGRA_DMA_REQ_BUF_STATUS_FULL;
-				req->bytes_transferred = req->size;
+				int bytes_transferred;
+
+				bytes_transferred = ch->req_transfer_count;
+				bytes_transferred += 1;
+				bytes_transferred <<= 3;
+				req->buffer_status = TEGRA_DMA_REQ_BUF_STATUS_FULL;
+				req->bytes_transferred = bytes_transferred;
 				req->status = TEGRA_DMA_REQ_SUCCESS;
 				tegra_dma_stop(ch);
 
@@ -710,14 +764,13 @@ static void handle_continuous_dbl_dma(struct tegra_dma_channel *ch)
 
 				list_del(&req->node);
 
-				/* DMA lock is NOT held when callbak is
-				 * called. */
+				/* DMA lock is NOT held when callbak is called */
 				spin_unlock_irqrestore(&ch->lock, irq_flags);
 				req->complete(req);
 				return;
 			}
-			/* Load the next request into the hardware, if
-			 * available. */
+			/* Load the next request into the hardware, if available
+			 * */
 			if (!list_is_last(&req->node, &ch->list)) {
 				next_req = list_entry(req->node.next,
 					typeof(*next_req), node);
@@ -745,10 +798,8 @@ static void handle_continuous_dbl_dma(struct tegra_dma_channel *ch)
 				/* It may be possible that req came after
 				 * half dma complete so it need to start
 				 * immediately */
-				next_req = list_entry(req->node.next,
-						typeof(*next_req), node);
-				if (next_req->status !=
-						TEGRA_DMA_REQ_INFLIGHT) {
+				next_req = list_entry(req->node.next, typeof(*next_req), node);
+				if (next_req->status != TEGRA_DMA_REQ_INFLIGHT) {
 					tegra_dma_stop(ch);
 					tegra_dma_update_hw(ch, next_req);
 				}
@@ -851,27 +902,44 @@ int __init tegra_dma_init(void)
 	int i;
 	unsigned int irq;
 	void __iomem *addr;
+	struct clk *c;
+
+	bitmap_fill(channel_usage, NV_DMA_MAX_CHANNELS);
+
+	c = clk_get_sys("tegra-dma", NULL);
+	if (IS_ERR(c)) {
+		pr_err("Unable to get clock for APB DMA\n");
+		ret = PTR_ERR(c);
+		goto fail;
+	}
+	ret = clk_enable(c);
+	if (ret != 0) {
+		pr_err("Unable to enable clock for APB DMA\n");
+		goto fail;
+	}
+
+	dma_clk = clk_get_sys("apbdma", "apbdma");
+	if (!IS_ERR_OR_NULL(dma_clk)) {
+		clk_enable(dma_clk);
+		tegra_periph_reset_assert(dma_clk);
+		udelay(10);
+		tegra_periph_reset_deassert(dma_clk);
+		udelay(10);
+	}
 
 	addr = IO_ADDRESS(TEGRA_APB_DMA_BASE);
 	writel(GEN_ENABLE, addr + APB_DMA_GEN);
 	writel(0, addr + APB_DMA_CNTRL);
 	writel(0xFFFFFFFFul >> (31 - TEGRA_SYSTEM_DMA_CH_MAX),
-	       addr + APB_DMA_IRQ_MASK_SET);
-
-	memset(channel_usage, 0, sizeof(channel_usage));
-	memset(dma_channels, 0, sizeof(dma_channels));
-
-	/* Reserve all the channels we are not supposed to touch */
-	for (i = 0; i < TEGRA_SYSTEM_DMA_CH_MIN; i++)
-		__set_bit(i, channel_usage);
+			addr + APB_DMA_IRQ_MASK_SET);
 
 	for (i = TEGRA_SYSTEM_DMA_CH_MIN; i <= TEGRA_SYSTEM_DMA_CH_MAX; i++) {
 		struct tegra_dma_channel *ch = &dma_channels[i];
 
-		__clear_bit(i, channel_usage);
-
 		ch->id = i;
 		snprintf(ch->name, TEGRA_DMA_NAME_SIZE, "dma_channel_%d", i);
+
+		memset(ch->client_name, 0, sizeof(ch->client_name));
 
 		ch->addr = IO_ADDRESS(TEGRA_APB_DMA_CH0_BASE +
 			TEGRA_APB_DMA_CH0_SIZE * i);
@@ -879,7 +947,12 @@ int __init tegra_dma_init(void)
 		spin_lock_init(&ch->lock);
 		INIT_LIST_HEAD(&ch->list);
 
-		irq = INT_APB_DMA_CH0 + i;
+#ifndef CONFIG_ARCH_TEGRA_2x_SOC
+		if (i >= 16)
+			irq = INT_APB_DMA_CH16 + i - 16;
+		else
+#endif
+			irq = INT_APB_DMA_CH0 + i;
 		ret = request_irq(irq, dma_isr, 0, dma_channels[i].name, ch);
 		if (ret) {
 			pr_err("Failed to register IRQ %d for DMA %d\n",
@@ -887,14 +960,15 @@ int __init tegra_dma_init(void)
 			goto fail;
 		}
 		ch->irq = irq;
+
+		__clear_bit(i, channel_usage);
 	}
 	/* mark the shared channel allocated */
 	__set_bit(TEGRA_SYSTEM_DMA_CH_MIN, channel_usage);
 
-	for (i = TEGRA_SYSTEM_DMA_CH_MAX+1; i < NV_DMA_MAX_CHANNELS; i++)
-		__set_bit(i, channel_usage);
+	tegra_dma_initialized = true;
 
-	return ret;
+	return 0;
 fail:
 	writel(0, addr + APB_DMA_GEN);
 	for (i = TEGRA_SYSTEM_DMA_CH_MIN; i <= TEGRA_SYSTEM_DMA_CH_MAX; i++) {
@@ -904,11 +978,13 @@ fail:
 	}
 	return ret;
 }
+postcore_initcall(tegra_dma_init);
 
-#ifdef CONFIG_PM
+#ifdef CONFIG_PM_SLEEP
+
 static u32 apb_dma[5*TEGRA_SYSTEM_DMA_CH_NR + 3];
 
-void tegra_dma_suspend(void)
+static int tegra_dma_suspend(void)
 {
 	void __iomem *addr = IO_ADDRESS(TEGRA_APB_DMA_BASE);
 	u32 *ctx = apb_dma;
@@ -928,9 +1004,11 @@ void tegra_dma_suspend(void)
 		*ctx++ = readl(addr + APB_DMA_CHAN_APB_PTR);
 		*ctx++ = readl(addr + APB_DMA_CHAN_APB_SEQ);
 	}
+
+	return 0;
 }
 
-void tegra_dma_resume(void)
+static void tegra_dma_resume(void)
 {
 	void __iomem *addr = IO_ADDRESS(TEGRA_APB_DMA_BASE);
 	u32 *ctx = apb_dma;
@@ -952,4 +1030,79 @@ void tegra_dma_resume(void)
 	}
 }
 
+static struct syscore_ops tegra_dma_syscore_ops = {
+	.suspend = tegra_dma_suspend,
+	.resume = tegra_dma_resume,
+};
+
+static int tegra_dma_syscore_init(void)
+{
+	register_syscore_ops(&tegra_dma_syscore_ops);
+
+	return 0;
+}
+subsys_initcall(tegra_dma_syscore_init);
+#endif
+
+#ifdef CONFIG_DEBUG_FS
+
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
+
+static int dbg_dma_show(struct seq_file *s, void *unused)
+{
+	int i;
+	void __iomem *addr = IO_ADDRESS(TEGRA_APB_DMA_BASE);
+
+	seq_printf(s, "    APBDMA global register\n");
+	seq_printf(s, "DMA_GEN:   0x%08x\n", __raw_readl(addr + APB_DMA_GEN));
+	seq_printf(s, "DMA_CNTRL: 0x%08x\n", __raw_readl(addr + APB_DMA_CNTRL));
+	seq_printf(s, "IRQ_MASK:  0x%08x\n",
+					__raw_readl(addr + APB_DMA_IRQ_MASK));
+
+	for (i = 0; i < TEGRA_SYSTEM_DMA_CH_NR; i++) {
+		addr = IO_ADDRESS(TEGRA_APB_DMA_CH0_BASE +
+				  TEGRA_APB_DMA_CH0_SIZE * i);
+
+		seq_printf(s, "    APBDMA channel %02d register\n", i);
+		seq_printf(s, "0x00: 0x%08x 0x%08x 0x%08x 0x%08x\n",
+					__raw_readl(addr + 0x0),
+					__raw_readl(addr + 0x4),
+					__raw_readl(addr + 0x8),
+					__raw_readl(addr + 0xC));
+		seq_printf(s, "0x10: 0x%08x 0x%08x 0x%08x 0x%08x\n",
+					__raw_readl(addr + 0x10),
+					__raw_readl(addr + 0x14),
+					__raw_readl(addr + 0x18),
+					__raw_readl(addr + 0x1C));
+	}
+	seq_printf(s, "\nAPB DMA users\n");
+	seq_printf(s, "-------------\n");
+	for (i = TEGRA_SYSTEM_DMA_CH_MIN; i <= TEGRA_SYSTEM_DMA_CH_MAX; i++) {
+		struct tegra_dma_channel *ch = &dma_channels[i];
+		if (strlen(ch->client_name) > 0)
+			seq_printf(s, "dma %d -> %s\n", i, ch->client_name);
+	}
+	return 0;
+}
+
+static int dbg_dma_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, dbg_dma_show, &inode->i_private);
+}
+
+static const struct file_operations debug_fops = {
+	.open	   = dbg_dma_open,
+	.read	   = seq_read,
+	.llseek	 = seq_lseek,
+	.release	= single_release,
+};
+
+static int __init tegra_dma_debuginit(void)
+{
+	(void) debugfs_create_file("tegra_dma", S_IRUGO,
+					NULL, NULL, &debug_fops);
+	return 0;
+}
+late_initcall(tegra_dma_debuginit);
 #endif

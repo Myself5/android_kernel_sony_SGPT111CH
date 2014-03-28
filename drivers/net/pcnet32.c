@@ -376,7 +376,7 @@ static void pcnet32_wio_reset(unsigned long addr)
 static int pcnet32_wio_check(unsigned long addr)
 {
 	outw(88, addr + PCNET32_WIO_RAP);
-	return (inw(addr + PCNET32_WIO_RAP) == 88);
+	return inw(addr + PCNET32_WIO_RAP) == 88;
 }
 
 static struct pcnet32_access pcnet32_wio = {
@@ -431,7 +431,7 @@ static void pcnet32_dwio_reset(unsigned long addr)
 static int pcnet32_dwio_check(unsigned long addr)
 {
 	outl(88, addr + PCNET32_DWIO_RAP);
-	return ((inl(addr + PCNET32_DWIO_RAP) & 0xffff) == 88);
+	return (inl(addr + PCNET32_DWIO_RAP) & 0xffff) == 88;
 }
 
 static struct pcnet32_access pcnet32_dwio = {
@@ -1651,7 +1651,7 @@ pcnet32_probe1(unsigned long ioaddr, int shared, struct pci_dev *pdev)
 	/*
 	 *  On selected chips turn on the BCR18:NOUFLO bit. This stops transmit
 	 *  starting until the packet is loaded. Strike one for reliability, lose
-	 *  one for latency - although on PCI this isnt a big loss. Older chips
+	 *  one for latency - although on PCI this isn't a big loss. Older chips
 	 *  have FIFO's smaller than a packet, so you can't do this.
 	 *  Turn on BCR18:BurstRdEn and BCR18:BurstWrEn.
 	 */

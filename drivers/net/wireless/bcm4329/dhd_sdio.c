@@ -69,9 +69,9 @@
 #include <hndrte_armtrap.h>
 #endif /* DHD_DEBUG_TRAP */
 
-#define QLEN		256	/* bulk rx and tx queue lengths */
-#define FCHI		(QLEN - 10)
-#define FCLOW		(FCHI / 2)
+#define QLEN		2048	/* bulk rx and tx queue lengths */
+#define FCHI		(QLEN - 256)
+#define FCLOW		(FCHI -256)
 #define PRIOMASK	7
 
 #define TXRETRIES	2	/* # of retries for tx frames */
@@ -1285,7 +1285,8 @@ dhd_bus_txctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 			DHD_INFO(("%s: ctrl_frame_stat == FALSE\n", __FUNCTION__));
 			ret = 0;
 		} else {
-			DHD_INFO(("%s: ctrl_frame_stat == TRUE\n", __FUNCTION__));
+			if (!bus->dhd->hang_was_sent)
+				DHD_ERROR(("%s: ctrl_frame_stat == TRUE\n", __FUNCTION__));
 			ret = -1;
 		}
 	}
@@ -4787,7 +4788,7 @@ dhdsdio_probe(uint16 venid, uint16 devid, uint16 bus_no, uint16 slot,
 	sd1idle = TRUE;
 	dhd_readahead = TRUE;
 	retrydata = FALSE;
-	dhd_doflow = FALSE;
+	dhd_doflow = TRUE;
 	dhd_dongle_memsize = 0;
 	dhd_txminmax = DHD_TXMINMAX;
 
@@ -5758,6 +5759,12 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 			/* Force flow control as protection when stop come before ifconfig_down */
 			dhd_txflowcontrol(bus->dhd, 0, ON);
 #endif /* !defined(IGNORE_ETH0_DOWN) */
+
+#if !defined(OOB_INTR_ONLY)
+			/* to avoid supurious client interrupt during stop process */
+			bcmsdh_stop(bus->sdh);
+#endif /* !defined(OOB_INTR_ONLY) */
+
 			/* Expect app to have torn down any connection before calling */
 			/* Stop the bus, disable F2 */
 			dhd_bus_stop(bus, FALSE);

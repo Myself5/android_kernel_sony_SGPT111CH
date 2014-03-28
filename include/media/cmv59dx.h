@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * cmv59dx.h - cmv59dx driver header
  *
@@ -27,6 +27,7 @@
 #define CMV59DX_IOCTL_SET_MODE		_IOW('o', 1, struct cmv59dx_mode)
 #define CMV59DX_IOCTL_INIT_DEV  	_IOW('o', 2, __u32)
 #define CMV59DX_IOCTL_SET_FPS	    _IOW('o', 3, __u8)
+#define CMV59DX_IOCTL_SET_VIDEO_CHAT             _IOW('o', 4, __u32)
 
 enum cmv59dx_test_pattern {
 	TEST_PATTERN_NONE,

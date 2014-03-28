@@ -29,6 +29,7 @@
 #include <linux/clk.h>
 #include <linux/gfp.h>
 #include <linux/delay.h>
+#include <linux/err.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -568,6 +569,7 @@ static int mpc5121_nfc_read_hw_config(struct mtd_info *mtd)
 	uint rcw_width;
 	uint rcwh;
 	uint romloc, ps;
+	int ret = 0;
 
 	rmnode = of_find_compatible_node(NULL, NULL, "fsl,mpc5121-reset");
 	if (!rmnode) {
@@ -579,7 +581,8 @@ static int mpc5121_nfc_read_hw_config(struct mtd_info *mtd)
 	rm = of_iomap(rmnode, 0);
 	if (!rm) {
 		dev_err(prv->dev, "Error mapping reset module node!\n");
-		return -EBUSY;
+		ret = -EBUSY;
+		goto out;
 	}
 
 	rcwh = in_be32(&rm->rcwhr);
@@ -628,8 +631,9 @@ static int mpc5121_nfc_read_hw_config(struct mtd_info *mtd)
 				rcw_width * 8, rcw_pagesize,
 				rcw_sparesize);
 	iounmap(rm);
+out:
 	of_node_put(rmnode);
-	return 0;
+	return ret;
 }
 
 /* Free driver resources */
@@ -647,8 +651,7 @@ static void mpc5121_nfc_free(struct device *dev, struct mtd_info *mtd)
 		iounmap(prv->csreg);
 }
 
-static int __devinit mpc5121_nfc_probe(struct platform_device *op,
-					const struct of_device_id *match)
+static int __devinit mpc5121_nfc_probe(struct platform_device *op)
 {
 	struct device_node *rootnode, *dn = op->dev.of_node;
 	struct device *dev = &op->dev;
@@ -660,7 +663,7 @@ static int __devinit mpc5121_nfc_probe(struct platform_device *op,
 #endif
 	struct nand_chip *chip;
 	unsigned long regs_paddr, regs_size;
-	const uint *chips_no;
+	const __be32 *chips_no;
 	int resettime = 0;
 	int retval = 0;
 	int rev, len;
@@ -755,9 +758,9 @@ static int __devinit mpc5121_nfc_probe(struct platform_device *op,
 
 	/* Enable NFC clock */
 	prv->clk = clk_get(dev, "nfc_clk");
-	if (!prv->clk) {
+	if (IS_ERR(prv->clk)) {
 		dev_err(dev, "Unable to acquire NFC clock!\n");
-		retval = -ENODEV;
+		retval = PTR_ERR(prv->clk);
 		goto error;
 	}
 
@@ -803,7 +806,7 @@ static int __devinit mpc5121_nfc_probe(struct platform_device *op,
 	}
 
 	/* Detect NAND chips */
-	if (nand_scan(mtd, *chips_no)) {
+	if (nand_scan(mtd, be32_to_cpup(chips_no))) {
 		dev_err(dev, "NAND Flash not found !\n");
 		devm_free_irq(dev, prv->irq, mtd);
 		retval = -ENXIO;
@@ -888,7 +891,7 @@ static struct of_device_id mpc5121_nfc_match[] __devinitdata = {
 	{},
 };
 
-static struct of_platform_driver mpc5121_nfc_driver = {
+static struct platform_driver mpc5121_nfc_driver = {
 	.probe		= mpc5121_nfc_probe,
 	.remove		= __devexit_p(mpc5121_nfc_remove),
 	.driver		= {
@@ -900,14 +903,14 @@ static struct of_platform_driver mpc5121_nfc_driver = {
 
 static int __init mpc5121_nfc_init(void)
 {
-	return of_register_platform_driver(&mpc5121_nfc_driver);
+	return platform_driver_register(&mpc5121_nfc_driver);
 }
 
 module_init(mpc5121_nfc_init);
 
 static void __exit mpc5121_nfc_cleanup(void)
 {
-	of_unregister_platform_driver(&mpc5121_nfc_driver);
+	platform_driver_unregister(&mpc5121_nfc_driver);
 }
 
 module_exit(mpc5121_nfc_cleanup);

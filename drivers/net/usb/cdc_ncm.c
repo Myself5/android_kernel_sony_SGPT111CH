@@ -1,8 +1,7 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
 /*
  * cdc_ncm.c
  *
- * Copyright (C) ST-Ericsson 2010
+ * Copyright (C) ST-Ericsson 2010-2011
  * Contact: Alexey Orishko <alexey.orishko@stericsson.com>
  * Original author: Hans Petter Selasky <hans.petter.selasky@stericsson.com>
  *
@@ -51,11 +50,16 @@
 #include <linux/version.h>
 #include <linux/timer.h>
 #include <linux/spinlock.h>
-#include <linux/atomic.h>
+#ifdef MBM_LOCAL_BUILD
+#include "usbnet.h"
+#include "cdc.h"
+#else
 #include <linux/usb/usbnet.h>
 #include <linux/usb/cdc.h>
+#endif
+#include <linux/pm_runtime.h>
 
-#define	DRIVER_VERSION				"30-Nov-2010"
+#define	DRIVER_VERSION				"01-June-2011-mbm-1"
 
 /* CDC NCM subclass 3.2.1 */
 #define USB_CDC_NCM_NDP16_LENGTH_MIN		0x10
@@ -78,6 +82,9 @@
  */
 #define	CDC_NCM_DPT_DATAGRAMS_MAX		32
 
+/* Maximum amount of IN datagrams in NTB */
+#define	CDC_NCM_DPT_DATAGRAMS_IN_MAX		0 /* unlimited */
+
 /* Restart the timer, if amount of datagrams is less than given value */
 #define	CDC_NCM_RESTART_TIMER_DATAGRAM_CNT	3
 
@@ -85,11 +92,6 @@
 #define	CDC_NCM_MIN_HDR_SIZE \
 	(sizeof(struct usb_cdc_ncm_nth16) + sizeof(struct usb_cdc_ncm_ndp16) + \
 	(CDC_NCM_DPT_DATAGRAMS_MAX + 1) * sizeof(struct usb_cdc_ncm_dpe16))
-
-struct connection_speed_change {
-	__le32	USBitRate; /* holds 3GPP downlink value, bits per second */
-	__le32	DSBitRate; /* holds 3GPP uplink value, bits per second */
-} __attribute__ ((packed));
 
 struct cdc_ncm_data {
 	struct usb_cdc_ncm_nth16 nth16;
@@ -137,8 +139,7 @@ struct cdc_ncm_ctx {
 	u16 tx_ndp_modulus;
 	u16 tx_seq;
 	u16 connected;
-	u8 data_claimed;
-	u8 control_claimed;
+	int packet_cnt;
 };
 
 static void cdc_ncm_tx_timeout(unsigned long arg);
@@ -195,14 +196,29 @@ cdc_ncm_do_request(struct cdc_ncm_ctx *ctx, struct usb_cdc_notification *req,
 	return 0;
 }
 
+static void cdc_ncm_set_urb_size(struct usbnet *dev, int size)
+{
+	struct cdc_ncm_ctx *ctx;
+	ctx = (struct cdc_ncm_ctx *)dev->data[0];
+  
+  	if ( size == ctx->rx_max) {
+		dev->rx_queue_enable = 1;
+	} else {
+		dev->rx_queue_enable = 0;
+	}
+
+	dev->rx_urb_size = size;
+	usbnet_unlink_rx_urbs(dev);
+}
+
 static u8 cdc_ncm_setup(struct cdc_ncm_ctx *ctx)
 {
 	struct usb_cdc_notification req;
 	u32 val;
-	__le16 max_datagram_size;
 	u8 flags;
 	u8 iface_no;
 	int err;
+	u16 ntb_fmt_supported;
 
 	iface_no = ctx->control->cur_altsetting->desc.bInterfaceNumber;
 
@@ -224,6 +240,9 @@ static u8 cdc_ncm_setup(struct cdc_ncm_ctx *ctx)
 	ctx->tx_remainder = le16_to_cpu(ctx->ncm_parm.wNdpOutPayloadRemainder);
 	ctx->tx_modulus = le16_to_cpu(ctx->ncm_parm.wNdpOutDivisor);
 	ctx->tx_ndp_modulus = le16_to_cpu(ctx->ncm_parm.wNdpOutAlignment);
+	/* devices prior to NCM Errata shall set this field to zero */
+	ctx->tx_max_datagrams = le16_to_cpu(ctx->ncm_parm.wNtbOutMaxDatagrams);
+	ntb_fmt_supported = le16_to_cpu(ctx->ncm_parm.bmNtbFormatsSupported);
 
 	if (ctx->func_desc != NULL)
 		flags = ctx->func_desc->bmNetworkCapabilities;
@@ -232,20 +251,56 @@ static u8 cdc_ncm_setup(struct cdc_ncm_ctx *ctx)
 
 	pr_debug("dwNtbInMaxSize=%u dwNtbOutMaxSize=%u "
 		 "wNdpOutPayloadRemainder=%u wNdpOutDivisor=%u "
-		 "wNdpOutAlignment=%u flags=0x%x\n",
+		 "wNdpOutAlignment=%u wNtbOutMaxDatagrams=%u flags=0x%x\n",
 		 ctx->rx_max, ctx->tx_max, ctx->tx_remainder, ctx->tx_modulus,
-		 ctx->tx_ndp_modulus, flags);
+		 ctx->tx_ndp_modulus, ctx->tx_max_datagrams, flags);
 
-	/* max count of tx datagrams without terminating NULL entry */
-	ctx->tx_max_datagrams = CDC_NCM_DPT_DATAGRAMS_MAX;
+	/* max count of tx datagrams */
+	if ((ctx->tx_max_datagrams == 0) ||
+			(ctx->tx_max_datagrams > CDC_NCM_DPT_DATAGRAMS_MAX))
+		ctx->tx_max_datagrams = CDC_NCM_DPT_DATAGRAMS_MAX;
 
 	/* verify maximum size of received NTB in bytes */
-	if ((ctx->rx_max <
-	    (CDC_NCM_MIN_HDR_SIZE + CDC_NCM_MIN_DATAGRAM_SIZE)) ||
-	    (ctx->rx_max > CDC_NCM_NTB_MAX_SIZE_RX)) {
+	if (ctx->rx_max < USB_CDC_NCM_NTB_MIN_IN_SIZE) {
+		pr_debug("Using min receive length=%d\n",
+						USB_CDC_NCM_NTB_MIN_IN_SIZE);
+		ctx->rx_max = USB_CDC_NCM_NTB_MIN_IN_SIZE;
+	}
+
+	if (ctx->rx_max > CDC_NCM_NTB_MAX_SIZE_RX) {
 		pr_debug("Using default maximum receive length=%d\n",
 						CDC_NCM_NTB_MAX_SIZE_RX);
 		ctx->rx_max = CDC_NCM_NTB_MAX_SIZE_RX;
+	}
+
+	/* inform device about NTB input size changes */
+	if (ctx->rx_max != le32_to_cpu(ctx->ncm_parm.dwNtbInMaxSize)) {
+		req.bmRequestType = USB_TYPE_CLASS | USB_DIR_OUT |
+							USB_RECIP_INTERFACE;
+		req.bNotificationType = USB_CDC_SET_NTB_INPUT_SIZE;
+		req.wValue = 0;
+		req.wIndex = cpu_to_le16(iface_no);
+
+		if (flags & USB_CDC_NCM_NCAP_NTB_INPUT_SIZE) {
+			struct usb_cdc_ncm_ndp_input_size ndp_in_sz;
+
+			req.wLength = 8;
+			ndp_in_sz.dwNtbInMaxSize = cpu_to_le32(ctx->rx_max);
+			ndp_in_sz.wNtbInMaxDatagrams =
+					cpu_to_le16(CDC_NCM_DPT_DATAGRAMS_MAX);
+			ndp_in_sz.wReserved = 0;
+			err = cdc_ncm_do_request(ctx, &req, &ndp_in_sz, 0, NULL,
+									1000);
+		} else {
+			__le32 dwNtbInMaxSize = cpu_to_le32(ctx->rx_max);
+
+			req.wLength = 4;
+			err = cdc_ncm_do_request(ctx, &req, &dwNtbInMaxSize, 0,
+								NULL, 1000);
+		}
+
+		if (err)
+			pr_debug("Setting NTB Input Size failed\n");
 	}
 
 	/* verify maximum size of transmitted NTB in bytes */
@@ -298,47 +353,84 @@ static u8 cdc_ncm_setup(struct cdc_ncm_ctx *ctx)
 	/* additional configuration */
 
 	/* set CRC Mode */
-	req.bmRequestType = USB_TYPE_CLASS | USB_DIR_OUT | USB_RECIP_INTERFACE;
-	req.bNotificationType = USB_CDC_SET_CRC_MODE;
-	req.wValue = cpu_to_le16(USB_CDC_NCM_CRC_NOT_APPENDED);
-	req.wIndex = cpu_to_le16(iface_no);
-	req.wLength = 0;
+	if (flags & USB_CDC_NCM_NCAP_CRC_MODE) {
+		req.bmRequestType = USB_TYPE_CLASS | USB_DIR_OUT |
+							USB_RECIP_INTERFACE;
+		req.bNotificationType = USB_CDC_SET_CRC_MODE;
+		req.wValue = cpu_to_le16(USB_CDC_NCM_CRC_NOT_APPENDED);
+		req.wIndex = cpu_to_le16(iface_no);
+		req.wLength = 0;
 
-	err = cdc_ncm_do_request(ctx, &req, NULL, 0, NULL, 1000);
-	if (err)
-		pr_debug("Setting CRC mode off failed\n");
+		err = cdc_ncm_do_request(ctx, &req, NULL, 0, NULL, 1000);
+		if (err)
+			pr_debug("Setting CRC mode off failed\n");
+	}
 
-	/* set NTB format */
-	req.bmRequestType = USB_TYPE_CLASS | USB_DIR_OUT | USB_RECIP_INTERFACE;
-	req.bNotificationType = USB_CDC_SET_NTB_FORMAT;
-	req.wValue = cpu_to_le16(USB_CDC_NCM_NTB16_FORMAT);
-	req.wIndex = cpu_to_le16(iface_no);
-	req.wLength = 0;
+	/* set NTB format, if both formats are supported */
+	if (ntb_fmt_supported & USB_CDC_NCM_NTH32_SIGN) {
+		req.bmRequestType = USB_TYPE_CLASS | USB_DIR_OUT |
+							USB_RECIP_INTERFACE;
+		req.bNotificationType = USB_CDC_SET_NTB_FORMAT;
+		req.wValue = cpu_to_le16(USB_CDC_NCM_NTB16_FORMAT);
+		req.wIndex = cpu_to_le16(iface_no);
+		req.wLength = 0;
 
-	err = cdc_ncm_do_request(ctx, &req, NULL, 0, NULL, 1000);
-	if (err)
-		pr_debug("Setting NTB format to 16-bit failed\n");
+		err = cdc_ncm_do_request(ctx, &req, NULL, 0, NULL, 1000);
+		if (err)
+			pr_debug("Setting NTB format to 16-bit failed\n");
+	}
+
+	ctx->max_datagram_size = CDC_NCM_MIN_DATAGRAM_SIZE;
 
 	/* set Max Datagram Size (MTU) */
-	req.bmRequestType = USB_TYPE_CLASS | USB_DIR_IN | USB_RECIP_INTERFACE;
-	req.bNotificationType = USB_CDC_GET_MAX_DATAGRAM_SIZE;
-	req.wValue = 0;
-	req.wIndex = cpu_to_le16(iface_no);
-	req.wLength = cpu_to_le16(2);
+	if (flags & USB_CDC_NCM_NCAP_MAX_DATAGRAM_SIZE) {
+		__le16 max_datagram_size;
+		u16 eth_max_sz = le16_to_cpu(ctx->ether_desc->wMaxSegmentSize);
 
-	err = cdc_ncm_do_request(ctx, &req, &max_datagram_size, 0, NULL, 1000);
-	if (err) {
-		pr_debug(" GET_MAX_DATAGRAM_SIZE failed, using size=%u\n",
-			 CDC_NCM_MIN_DATAGRAM_SIZE);
-		/* use default */
-		ctx->max_datagram_size = CDC_NCM_MIN_DATAGRAM_SIZE;
-	} else {
-		ctx->max_datagram_size = le16_to_cpu(max_datagram_size);
+		req.bmRequestType = USB_TYPE_CLASS | USB_DIR_IN |
+							USB_RECIP_INTERFACE;
+		req.bNotificationType = USB_CDC_GET_MAX_DATAGRAM_SIZE;
+		req.wValue = 0;
+		req.wIndex = cpu_to_le16(iface_no);
+		req.wLength = cpu_to_le16(2);
 
-		if (ctx->max_datagram_size < CDC_NCM_MIN_DATAGRAM_SIZE)
-			ctx->max_datagram_size = CDC_NCM_MIN_DATAGRAM_SIZE;
-		else if (ctx->max_datagram_size > CDC_NCM_MAX_DATAGRAM_SIZE)
-			ctx->max_datagram_size = CDC_NCM_MAX_DATAGRAM_SIZE;
+		err = cdc_ncm_do_request(ctx, &req, &max_datagram_size, 0, NULL,
+									1000);
+		if (err) {
+			pr_debug("GET_MAX_DATAGRAM_SIZE failed, use size=%u\n",
+						CDC_NCM_MIN_DATAGRAM_SIZE);
+		} else {
+			ctx->max_datagram_size = le16_to_cpu(max_datagram_size);
+			/* Check Eth descriptor value */
+			if (eth_max_sz < CDC_NCM_MAX_DATAGRAM_SIZE) {
+				if (ctx->max_datagram_size > eth_max_sz)
+					ctx->max_datagram_size = eth_max_sz;
+			} else {
+				if (ctx->max_datagram_size >
+						CDC_NCM_MAX_DATAGRAM_SIZE)
+					ctx->max_datagram_size =
+						CDC_NCM_MAX_DATAGRAM_SIZE;
+			}
+
+			if (ctx->max_datagram_size < CDC_NCM_MIN_DATAGRAM_SIZE)
+				ctx->max_datagram_size =
+					CDC_NCM_MIN_DATAGRAM_SIZE;
+
+			/* if value changed, update device */
+			req.bmRequestType = USB_TYPE_CLASS | USB_DIR_OUT |
+							USB_RECIP_INTERFACE;
+			req.bNotificationType = USB_CDC_SET_MAX_DATAGRAM_SIZE;
+			req.wValue = 0;
+			req.wIndex = cpu_to_le16(iface_no);
+			req.wLength = 2;
+			max_datagram_size = cpu_to_le16(ctx->max_datagram_size);
+
+			err = cdc_ncm_do_request(ctx, &req, &max_datagram_size,
+								0, NULL, 1000);
+			if (err)
+				pr_debug("SET_MAX_DATAGRAM_SIZE failed\n");
+		}
+
 	}
 
 	if (ctx->netdev->mtu != (ctx->max_datagram_size - ETH_HLEN))
@@ -387,17 +479,6 @@ static void cdc_ncm_free(struct cdc_ncm_ctx *ctx)
 
 	del_timer_sync(&ctx->tx_timer);
 
-	if (ctx->data_claimed) {
-		usb_set_intfdata(ctx->data, NULL);
-		usb_driver_release_interface(driver_of(ctx->intf), ctx->data);
-	}
-
-	if (ctx->control_claimed) {
-		usb_set_intfdata(ctx->control, NULL);
-		usb_driver_release_interface(driver_of(ctx->intf),
-								ctx->control);
-	}
-
 	if (ctx->tx_rem_skb != NULL) {
 		dev_kfree_skb_any(ctx->tx_rem_skb);
 		ctx->tx_rem_skb = NULL;
@@ -422,7 +503,7 @@ static int cdc_ncm_bind(struct usbnet *dev, struct usb_interface *intf)
 
 	ctx = kmalloc(sizeof(*ctx), GFP_KERNEL);
 	if (ctx == NULL)
-		goto error;
+		return -ENODEV;
 
 	memset(ctx, 0, sizeof(*ctx));
 
@@ -467,19 +548,13 @@ static int cdc_ncm_bind(struct usbnet *dev, struct usb_interface *intf)
 
 			ctx->ether_desc =
 					(const struct usb_cdc_ether_desc *)buf;
-
 			dev->hard_mtu =
 				le16_to_cpu(ctx->ether_desc->wMaxSegmentSize);
 
-			if (dev->hard_mtu <
-			    (CDC_NCM_MIN_DATAGRAM_SIZE - ETH_HLEN))
-				dev->hard_mtu =
-					CDC_NCM_MIN_DATAGRAM_SIZE - ETH_HLEN;
-
-			else if (dev->hard_mtu >
-				 (CDC_NCM_MAX_DATAGRAM_SIZE - ETH_HLEN))
-				dev->hard_mtu =
-					CDC_NCM_MAX_DATAGRAM_SIZE - ETH_HLEN;
+			if (dev->hard_mtu < CDC_NCM_MIN_DATAGRAM_SIZE)
+				dev->hard_mtu =	CDC_NCM_MIN_DATAGRAM_SIZE;
+			else if (dev->hard_mtu > CDC_NCM_MAX_DATAGRAM_SIZE)
+				dev->hard_mtu =	CDC_NCM_MAX_DATAGRAM_SIZE;
 			break;
 
 		case USB_CDC_NCM_TYPE:
@@ -501,46 +576,36 @@ advance:
 
 	/* check if we got everything */
 	if ((ctx->control == NULL) || (ctx->data == NULL) ||
-	    (ctx->ether_desc == NULL))
+	    (ctx->ether_desc == NULL) || (ctx->control != intf))
 		goto error;
 
 	/* claim interfaces, if any */
-	if (ctx->data != intf) {
-		temp = usb_driver_claim_interface(driver, ctx->data, dev);
-		if (temp)
-			goto error;
-		ctx->data_claimed = 1;
-	}
-
-	if (ctx->control != intf) {
-		temp = usb_driver_claim_interface(driver, ctx->control, dev);
-		if (temp)
-			goto error;
-		ctx->control_claimed = 1;
-	}
+	temp = usb_driver_claim_interface(driver, ctx->data, dev);
+	if (temp)
+		goto error;
 
 	iface_no = ctx->data->cur_altsetting->desc.bInterfaceNumber;
 
 	/* reset data interface */
 	temp = usb_set_interface(dev->udev, iface_no, 0);
 	if (temp)
-		goto error;
+		goto error2;
 
 	/* initialize data interface */
 	if (cdc_ncm_setup(ctx))
-		goto error;
+		goto error2;
 
 	/* configure data interface */
 	temp = usb_set_interface(dev->udev, iface_no, 1);
 	if (temp)
-		goto error;
+		goto error2;
 
 	cdc_ncm_find_endpoints(ctx, ctx->data);
 	cdc_ncm_find_endpoints(ctx, ctx->control);
 
 	if ((ctx->in_ep == NULL) || (ctx->out_ep == NULL) ||
 	    (ctx->status_ep == NULL))
-		goto error;
+		goto error2;
 
 	dev->net->ethtool_ops = &cdc_ncm_ethtool_ops;
 
@@ -550,7 +615,7 @@ advance:
 
 	temp = usbnet_get_ethernet_addr(dev, ctx->ether_desc->iMACAddress);
 	if (temp)
-		goto error;
+		goto error2;
 
 	dev_info(&dev->udev->dev, "MAC-Address: "
 				"0x%02x:0x%02x:0x%02x:0x%02x:0x%02x:0x%02x\n",
@@ -563,7 +628,10 @@ advance:
 	dev->out = usb_sndbulkpipe(dev->udev,
 		ctx->out_ep->desc.bEndpointAddress & USB_ENDPOINT_NUMBER_MASK);
 	dev->status = ctx->status_ep;
-	dev->rx_urb_size = ctx->rx_max;
+	/* dev->rx_urb_size = ctx->rx_max; */
+	/* Start with one bulk transfer just to check that we are in sync */
+	ctx->packet_cnt = 0;
+	cdc_ncm_set_urb_size(dev, 512);
 
 	/*
 	 * We should get an event when network connection is "connected" or
@@ -571,43 +639,53 @@ advance:
 	 * (carrier is OFF) during attach, so the IP network stack does not
 	 * start IPv6 negotiation and more.
 	 */
+	usb_enable_autosuspend(dev->udev);
+	if (device_can_wakeup(&dev->udev->dev))
+		device_init_wakeup(&dev->udev->dev, 1);
+
+	dev_info(&dev->udev->dev, "wakeup: %s\n", device_can_wakeup(&dev->udev->dev)
+		? (device_may_wakeup(&dev->udev->dev) ? "enabled" : "disabled")
+		: "");
+
+	
 	strcpy(dev->net->name, "rmnet%d");
 	netif_carrier_off(dev->net);
 	ctx->tx_speed = ctx->rx_speed = 0;
+	dev->rx_queue_enable = 0;
 	return 0;
 
+error2:
+	usb_set_intfdata(ctx->control, NULL);
+	usb_set_intfdata(ctx->data, NULL);
+	usb_driver_release_interface(driver, ctx->data);
 error:
 	cdc_ncm_free((struct cdc_ncm_ctx *)dev->data[0]);
 	dev->data[0] = 0;
-	dev_info(&dev->udev->dev, "Descriptor failure\n");
+	dev_info(&dev->udev->dev, "bind() failure\n");
 	return -ENODEV;
 }
 
 static void cdc_ncm_unbind(struct usbnet *dev, struct usb_interface *intf)
 {
 	struct cdc_ncm_ctx *ctx = (struct cdc_ncm_ctx *)dev->data[0];
-	struct usb_driver *driver;
+	struct usb_driver *driver = driver_of(intf);
 
 	if (ctx == NULL)
 		return;		/* no setup */
 
-	driver = driver_of(intf);
-
-	usb_set_intfdata(ctx->data, NULL);
-	usb_set_intfdata(ctx->control, NULL);
-	usb_set_intfdata(ctx->intf, NULL);
-
-	/* release interfaces, if any */
-	if (ctx->data_claimed) {
+	/* disconnect master --> disconnect slave */
+	if (intf == ctx->control && ctx->data) {
+		usb_set_intfdata(ctx->data, NULL);
 		usb_driver_release_interface(driver, ctx->data);
-		ctx->data_claimed = 0;
-	}
+		ctx->data = NULL;
 
-	if (ctx->control_claimed) {
+	} else if (intf == ctx->data && ctx->control) {
+		usb_set_intfdata(ctx->control, NULL);
 		usb_driver_release_interface(driver, ctx->control);
-		ctx->control_claimed = 0;
+		ctx->control = NULL;
 	}
 
+	usb_set_intfdata(ctx->intf, NULL);
 	cdc_ncm_free(ctx);
 }
 
@@ -630,13 +708,13 @@ cdc_ncm_fill_tx_frame(struct cdc_ncm_ctx *ctx, struct sk_buff *skb)
 	u32 offset;
 	u32 last_offset;
 	u16 n = 0;
-	u8 timeout = 0;
+	u8 ready2send = 0;
 
 	/* if there is a remaining skb, it gets priority */
 	if (skb != NULL)
 		swap(skb, ctx->tx_rem_skb);
 	else
-		timeout = 1;
+		ready2send = 1;
 
 	/*
 	 * +----------------+
@@ -656,7 +734,7 @@ cdc_ncm_fill_tx_frame(struct cdc_ncm_ctx *ctx, struct sk_buff *skb)
 
 	} else {
 		/* reset variables */
-		skb_out = alloc_skb(ctx->tx_max, GFP_ATOMIC);
+		skb_out = alloc_skb((ctx->tx_max + 1), GFP_ATOMIC);
 		if (skb_out == NULL) {
 			if (skb != NULL) {
 				dev_kfree_skb_any(skb);
@@ -684,9 +762,10 @@ cdc_ncm_fill_tx_frame(struct cdc_ncm_ctx *ctx, struct sk_buff *skb)
 
 	for (; n < ctx->tx_max_datagrams; n++) {
 		/* check if end of transmit buffer is reached */
-		if (offset >= ctx->tx_max)
+		if (offset >= ctx->tx_max) {
+			ready2send = 1;
 			break;
-
+		}
 		/* compute maximum buffer size */
 		rem = ctx->tx_max - offset;
 
@@ -713,9 +792,7 @@ cdc_ncm_fill_tx_frame(struct cdc_ncm_ctx *ctx, struct sk_buff *skb)
 				}
 				ctx->tx_rem_skb = skb;
 				skb = NULL;
-
-				/* loop one more time */
-				timeout = 1;
+				ready2send = 1;
 			}
 			break;
 		}
@@ -758,7 +835,7 @@ cdc_ncm_fill_tx_frame(struct cdc_ncm_ctx *ctx, struct sk_buff *skb)
 		ctx->tx_curr_last_offset = last_offset;
 		goto exit_no_skb;
 
-	} else if ((n < ctx->tx_max_datagrams) && (timeout == 0)) {
+	} else if ((n < ctx->tx_max_datagrams) && (ready2send == 0)) {
 		/* wait for more frames */
 		/* push variables */
 		ctx->tx_curr_skb = skb_out;
@@ -796,8 +873,11 @@ cdc_ncm_fill_tx_frame(struct cdc_ncm_ctx *ctx, struct sk_buff *skb)
 	/* store last offset */
 	last_offset = offset;
 
-	if ((last_offset < ctx->tx_max) && ((last_offset %
-			le16_to_cpu(ctx->out_ep->desc.wMaxPacketSize)) == 0)) {
+	if (((last_offset < ctx->tx_max) && ((last_offset %
+			le16_to_cpu(ctx->out_ep->desc.wMaxPacketSize)) == 0)) ||
+	    (((last_offset == ctx->tx_max) && ((ctx->tx_max %
+		le16_to_cpu(ctx->out_ep->desc.wMaxPacketSize)) == 0)) &&
+		(ctx->tx_max < le32_to_cpu(ctx->ncm_parm.dwNtbOutMaxSize)))) {
 		/* force short packet */
 		*(((u8 *)skb_out->data) + last_offset) = 0;
 		last_offset++;
@@ -815,7 +895,7 @@ cdc_ncm_fill_tx_frame(struct cdc_ncm_ctx *ctx, struct sk_buff *skb)
 					cpu_to_le16(sizeof(ctx->tx_ncm.nth16));
 	ctx->tx_ncm.nth16.wSequence = cpu_to_le16(ctx->tx_seq);
 	ctx->tx_ncm.nth16.wBlockLength = cpu_to_le16(last_offset);
-	ctx->tx_ncm.nth16.wFpIndex = ALIGN(sizeof(struct usb_cdc_ncm_nth16),
+	ctx->tx_ncm.nth16.wNdpIndex = ALIGN(sizeof(struct usb_cdc_ncm_nth16),
 							ctx->tx_ndp_modulus);
 
 	memcpy(skb_out->data, &(ctx->tx_ncm.nth16), sizeof(ctx->tx_ncm.nth16));
@@ -827,13 +907,13 @@ cdc_ncm_fill_tx_frame(struct cdc_ncm_ctx *ctx, struct sk_buff *skb)
 	rem = sizeof(ctx->tx_ncm.ndp16) + ((ctx->tx_curr_frame_num + 1) *
 					sizeof(struct usb_cdc_ncm_dpe16));
 	ctx->tx_ncm.ndp16.wLength = cpu_to_le16(rem);
-	ctx->tx_ncm.ndp16.wNextFpIndex = 0; /* reserved */
+	ctx->tx_ncm.ndp16.wNextNdpIndex = 0; /* reserved */
 
-	memcpy(((u8 *)skb_out->data) + ctx->tx_ncm.nth16.wFpIndex,
+	memcpy(((u8 *)skb_out->data) + ctx->tx_ncm.nth16.wNdpIndex,
 						&(ctx->tx_ncm.ndp16),
 						sizeof(ctx->tx_ncm.ndp16));
 
-	memcpy(((u8 *)skb_out->data) + ctx->tx_ncm.nth16.wFpIndex +
+	memcpy(((u8 *)skb_out->data) + ctx->tx_ncm.nth16.wNdpIndex +
 					sizeof(ctx->tx_ncm.ndp16),
 					&(ctx->tx_ncm.dpe16),
 					(ctx->tx_curr_frame_num + 1) *
@@ -870,15 +950,19 @@ static void cdc_ncm_tx_timeout(unsigned long arg)
 	if (ctx->tx_timer_pending != 0) {
 		ctx->tx_timer_pending--;
 		restart = 1;
-	} else
+	} else {
 		restart = 0;
+	}
 
 	spin_unlock(&ctx->mtx);
 
-	if (restart)
+	if (restart) {
+		spin_lock(&ctx->mtx);
 		cdc_ncm_tx_timeout_start(ctx);
-	else if (ctx->netdev != NULL)
+		spin_unlock(&ctx->mtx);
+	} else if (ctx->netdev != NULL) {
 		usbnet_start_xmit(NULL, ctx->netdev);
+	}
 }
 
 static struct sk_buff *
@@ -902,7 +986,6 @@ cdc_ncm_tx_fixup(struct usbnet *dev, struct sk_buff *skb, gfp_t flags)
 	skb_out = cdc_ncm_fill_tx_frame(ctx, skb);
 	if (ctx->tx_curr_skb != NULL)
 		need_timer = 1;
-	spin_unlock(&ctx->mtx);
 
 	/* Start timer, if there is a remaining skb */
 	if (need_timer)
@@ -910,6 +993,8 @@ cdc_ncm_tx_fixup(struct usbnet *dev, struct sk_buff *skb, gfp_t flags)
 
 	if (skb_out)
 		dev->net->stats.tx_packets += ctx->tx_curr_frame_num;
+
+	spin_unlock(&ctx->mtx);
 	return skb_out;
 
 error:
@@ -947,18 +1032,33 @@ static int cdc_ncm_rx_fixup(struct usbnet *dev, struct sk_buff *skb_in)
 
 	if (le32_to_cpu(ctx->rx_ncm.nth16.dwSignature) !=
 	    USB_CDC_NCM_NTH16_SIGN) {
-		pr_debug("invalid NTH16 signature <%u>\n",
-			 le32_to_cpu(ctx->rx_ncm.nth16.dwSignature));
+		ctx->packet_cnt++;;
+		pr_debug("invalid NTH16 signature <%u>, packet_cnt = %d\n",
+			 le32_to_cpu(ctx->rx_ncm.nth16.dwSignature), ctx->packet_cnt);
+
+		if (actlen == ctx->rx_max) {
+		  cdc_ncm_set_urb_size(dev, CDC_NCM_MIN_TX_PKT);
+		} else if (ctx->packet_cnt == 15) {
+			printk("next pkt should be on 8k boundery. Restart the rx queue with 8k urb\n");
+			cdc_ncm_set_urb_size(dev, ctx->rx_max);
+		}
 		goto error;
 	}
 
+	//printk("New pkt, skb len =  %d, pkt_cnt = %d\n", actlen, ctx->packet_cnt);
+	if (actlen == CDC_NCM_MIN_TX_PKT && ctx->packet_cnt != 0) {
+	  	printk("pkt not on boundery\n");
+	}
+	
+	ctx->packet_cnt = 0;
+	
 	temp = le16_to_cpu(ctx->rx_ncm.nth16.wBlockLength);
 	if (temp > sumlen) {
 		pr_debug("unsupported NTB block length %u/%u\n", temp, sumlen);
 		goto error;
 	}
 
-	temp = le16_to_cpu(ctx->rx_ncm.nth16.wFpIndex);
+	temp = le16_to_cpu(ctx->rx_ncm.nth16.wNdpIndex);
 	if ((temp + sizeof(ctx->rx_ncm.ndp16)) > actlen) {
 		pr_debug("invalid DPT16 index\n");
 		goto error;
@@ -1022,15 +1122,18 @@ static int cdc_ncm_rx_fixup(struct usbnet *dev, struct sk_buff *skb_in)
 		if (((offset + temp) > actlen) ||
 		    (temp > CDC_NCM_MAX_DATAGRAM_SIZE) || (temp < ETH_HLEN)) {
 			pr_debug("invalid frame detected (ignored)"
-				"offset[%u]=%u, length=%u, skb=%p\n",
-							x, offset, temp, skb);
+					"offset[%u]=%u, length=%u, skb=%p\n",
+					x, offset, temp, skb_in);
 			if (!x)
 				goto error;
 			break;
 
 		} else {
 			skb = skb_clone(skb_in, GFP_ATOMIC);
+			if (!skb)
+				goto error;
 			skb->len = temp;
+            skb->truesize = temp + sizeof(struct sk_buff);
 			skb->data = ((u8 *)skb_in->data) + offset;
 			skb_set_tail_pointer(skb, temp);
 			usbnet_skb_return(dev, skb);
@@ -1043,10 +1146,10 @@ error:
 
 static void
 cdc_ncm_speed_change(struct cdc_ncm_ctx *ctx,
-		     struct connection_speed_change *data)
+		     struct usb_cdc_speed_change *data)
 {
-	uint32_t rx_speed = le32_to_cpu(data->USBitRate);
-	uint32_t tx_speed = le32_to_cpu(data->DSBitRate);
+	uint32_t rx_speed = le32_to_cpu(data->DLBitRRate);
+	uint32_t tx_speed = le32_to_cpu(data->ULBitRate);
 
 	/*
 	 * Currently the USB-NET API does not support reporting the actual
@@ -1087,7 +1190,7 @@ static void cdc_ncm_status(struct usbnet *dev, struct urb *urb)
 	/* test for split data in 8-byte chunks */
 	if (test_and_clear_bit(EVENT_STS_SPLIT, &dev->flags)) {
 		cdc_ncm_speed_change(ctx,
-		      (struct connection_speed_change *)urb->transfer_buffer);
+		      (struct usb_cdc_speed_change *)urb->transfer_buffer);
 		return;
 	}
 
@@ -1111,16 +1214,18 @@ static void cdc_ncm_status(struct usbnet *dev, struct urb *urb)
 		else {
 			netif_carrier_off(dev->net);
 			ctx->tx_speed = ctx->rx_speed = 0;
+			ctx->packet_cnt = 0;
+			cdc_ncm_set_urb_size(dev, CDC_NCM_MIN_TX_PKT);
 		}
 		break;
 
 	case USB_CDC_NOTIFY_SPEED_CHANGE:
-		if (urb->actual_length <
-		    (sizeof(*event) + sizeof(struct connection_speed_change)))
+		if (urb->actual_length < (sizeof(*event) +
+					sizeof(struct usb_cdc_speed_change)))
 			set_bit(EVENT_STS_SPLIT, &dev->flags);
 		else
 			cdc_ncm_speed_change(ctx,
-				(struct connection_speed_change *) &event[1]);
+				(struct usb_cdc_speed_change *) &event[1]);
 		break;
 
 	default:
@@ -1165,7 +1270,7 @@ static int cdc_ncm_manage_power(struct usbnet *dev, int status)
 
 static const struct driver_info cdc_ncm_info = {
 	.description = "CDC NCM",
-	.flags = FLAG_NO_SETINT | FLAG_MULTI_PACKET,
+	.flags = FLAG_POINTTOPOINT | FLAG_NO_SETINT | FLAG_MULTI_PACKET,
 	.bind = cdc_ncm_bind,
 	.unbind = cdc_ncm_unbind,
 	.check_connect = cdc_ncm_check_connect,
@@ -1182,6 +1287,7 @@ static struct usb_driver cdc_ncm_driver = {
 	.disconnect = cdc_ncm_disconnect,
 	.suspend = usbnet_suspend,
 	.resume = usbnet_resume,
+	.reset_resume =	usbnet_resume,
 	.supports_autosuspend = 1,
 };
 

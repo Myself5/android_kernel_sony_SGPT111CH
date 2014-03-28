@@ -38,15 +38,16 @@ netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 #endif
 
-	u64_stats_update_begin(&brstats->syncp);
-	brstats->tx_packets++;
-	brstats->tx_bytes += skb->len;
-	u64_stats_update_end(&brstats->syncp);
-
 	BR_INPUT_SKB_CB(skb)->brdev = dev;
 
 	skb_reset_mac_header(skb);
 	skb_pull(skb, ETH_HLEN);
+
+	u64_stats_update_begin(&brstats->syncp);
+	brstats->tx_packets++;
+	/* Exclude ETH_HLEN from byte stats for consistency with Rx chain */
+	brstats->tx_bytes += skb->len;
+	u64_stats_update_end(&brstats->syncp);
 
 	rcu_read_lock();
 	if (is_multicast_ether_addr(dest)) {
@@ -78,6 +79,8 @@ static int br_dev_open(struct net_device *dev)
 {
 	struct net_bridge *br = netdev_priv(dev);
 
+	netif_carrier_off(dev);
+
 	br_features_recompute(br);
 	netif_start_queue(dev);
 	br_stp_enable_bridge(br);
@@ -93,6 +96,8 @@ static void br_dev_set_multicast_list(struct net_device *dev)
 static int br_dev_stop(struct net_device *dev)
 {
 	struct net_bridge *br = netdev_priv(dev);
+
+	netif_carrier_off(dev);
 
 	br_stp_disable_bridge(br);
 	br_multicast_stop(br);
@@ -141,7 +146,7 @@ static int br_change_mtu(struct net_device *dev, int new_mtu)
 
 #ifdef CONFIG_BRIDGE_NETFILTER
 	/* remember the MTU in the rtable for PMTU */
-	br->fake_rtable.dst.metrics[RTAX_MTU - 1] = new_mtu;
+	dst_metric_set(&br->fake_rtable.dst, RTAX_MTU, new_mtu);
 #endif
 
 	return 0;
@@ -210,6 +215,11 @@ static int br_set_tx_csum(struct net_device *dev, u32 data)
 
 	br_features_recompute(br);
 	return 0;
+}
+
+static int br_set_flags(struct net_device *netdev, u32 data)
+{
+	return ethtool_op_set_flags(netdev, data, ETH_FLAG_TXVLAN);
 }
 
 #ifdef CONFIG_NET_POLL_CONTROLLER
@@ -292,6 +302,21 @@ void br_netpoll_disable(struct net_bridge_port *p)
 
 #endif
 
+static int br_add_slave(struct net_device *dev, struct net_device *slave_dev)
+
+{
+	struct net_bridge *br = netdev_priv(dev);
+
+	return br_add_if(br, slave_dev);
+}
+
+static int br_del_slave(struct net_device *dev, struct net_device *slave_dev)
+{
+	struct net_bridge *br = netdev_priv(dev);
+
+	return br_del_if(br, slave_dev);
+}
+
 static const struct ethtool_ops br_ethtool_ops = {
 	.get_drvinfo    = br_getinfo,
 	.get_link	= ethtool_op_get_link,
@@ -304,6 +329,7 @@ static const struct ethtool_ops br_ethtool_ops = {
 	.get_ufo	= ethtool_op_get_ufo,
 	.set_ufo	= ethtool_op_set_ufo,
 	.get_flags	= ethtool_op_get_flags,
+	.set_flags	= br_set_flags,
 };
 
 static const struct net_device_ops br_netdev_ops = {
@@ -320,6 +346,8 @@ static const struct net_device_ops br_netdev_ops = {
 	.ndo_netpoll_cleanup	 = br_netpoll_cleanup,
 	.ndo_poll_controller	 = br_poll_controller,
 #endif
+	.ndo_add_slave		 = br_add_slave,
+	.ndo_del_slave		 = br_del_slave,
 };
 
 static void br_dev_free(struct net_device *dev)
@@ -343,5 +371,5 @@ void br_dev_setup(struct net_device *dev)
 
 	dev->features = NETIF_F_SG | NETIF_F_FRAGLIST | NETIF_F_HIGHDMA |
 			NETIF_F_GSO_MASK | NETIF_F_NO_CSUM | NETIF_F_LLTX |
-			NETIF_F_NETNS_LOCAL | NETIF_F_GSO;
+			NETIF_F_NETNS_LOCAL | NETIF_F_GSO | NETIF_F_HW_VLAN_TX;
 }

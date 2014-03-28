@@ -69,13 +69,6 @@ static const u8 mbm_guid[16] = {
 	0xa6, 0x07, 0xc0, 0xff, 0xcb, 0x7e, 0x39, 0x2a,
 };
 
-static int is_ncm(struct usb_interface_descriptor *desc)
-{
-	return desc->bInterfaceClass == USB_CLASS_COMM
-		&& desc->bInterfaceSubClass == USB_CDC_SUBCLASS_NCM
-		&& desc->bInterfaceProtocol == 0;
-}
-
 /*
  * probes control interface, claims data interface, collects the bulk
  * endpoints, activates data interface (if needed), maybe sets MTU.
@@ -90,7 +83,6 @@ int usbnet_generic_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
 	struct cdc_state		*info = (void *) &dev->data;
 	int				status;
 	int				rndis;
-	int				ncm;
 	struct usb_driver		*driver = driver_of(intf);
 	struct usb_cdc_mdlm_desc	*desc = NULL;
 	struct usb_cdc_mdlm_detail_desc *detail = NULL;
@@ -107,9 +99,7 @@ int usbnet_generic_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
 		 */
 		buf = dev->udev->actconfig->extra;
 		len = dev->udev->actconfig->extralen;
-		if (len)
-			dev_dbg(&intf->dev,
-				"CDC descriptors on config\n");
+		dev_dbg(&intf->dev, "CDC descriptors on config\n");
 	}
 
 	/* Maybe CDC descriptors are after the endpoint?  This bug has
@@ -134,9 +124,6 @@ int usbnet_generic_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
 	rndis = (is_rndis(&intf->cur_altsetting->desc) ||
 		 is_activesync(&intf->cur_altsetting->desc) ||
 		 is_wireless_rndis(&intf->cur_altsetting->desc));
-
-	/* is cdc-ncm device? */
-	ncm = is_ncm(&intf->cur_altsetting->desc);
 
 	memset(info, 0, sizeof *info);
 	info->control = intf;
@@ -275,24 +262,6 @@ int usbnet_generic_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
 			} else
 				goto bad_desc;
 			break;
-		case USB_CDC_NCM_TYPE:
-			if (info->ncm) {
-				dev_dbg(&intf->dev,
-					"extra NCM functional descriptor\n");
-				goto bad_desc;
-			}
-			info->ncm = (void *) buf;
-			if (info->ncm->bLength != sizeof *info->ncm) {
-				dev_dbg(&intf->dev, "CDC NCM len %u\n",
-					info->ncm->bLength);
-				goto bad_desc;
-			}
-
-			/* ignore bcdVersion, should be 1.0 anyway */
-
-			dev_dbg(&intf->dev, "bmNetworkCapabilities: 0x%02x\n",
-				info->ncm->bmNetworkCapabilities);
-			break;
 		}
 next_desc:
 		len -= buf [0];	/* bLength */
@@ -314,13 +283,11 @@ next_desc:
 			goto bad_desc;
 		}
 
-	} else if (!info->header || !info->u || (!rndis && !info->ether) ||
-		(ncm && !info->ncm)) {
-		dev_dbg(&intf->dev, "missing cdc %s%s%s%sdescriptor\n",
+	} else if (!info->header || !info->u || (!rndis && !info->ether)) {
+		dev_dbg(&intf->dev, "missing cdc %s%s%sdescriptor\n",
 			info->header ? "" : "header ",
 			info->u ? "" : "union ",
-			info->ether ? "" : "ether ",
-			info->ncm ? "" : "ncm ");
+			info->ether ? "" : "ether ");
 		goto bad_desc;
 	}
 
@@ -453,7 +420,7 @@ void usbnet_cdc_status(struct usbnet *dev, struct urb *urb)
 }
 EXPORT_SYMBOL_GPL(usbnet_cdc_status);
 
-static int cdc_bind(struct usbnet *dev, struct usb_interface *intf)
+int usbnet_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
 {
 	int				status;
 	struct cdc_state		*info = (void *) &dev->data;
@@ -475,6 +442,7 @@ static int cdc_bind(struct usbnet *dev, struct usb_interface *intf)
 	 */
 	return 0;
 }
+EXPORT_SYMBOL_GPL(usbnet_cdc_bind);
 
 static int cdc_manage_power(struct usbnet *dev, int on)
 {
@@ -484,18 +452,18 @@ static int cdc_manage_power(struct usbnet *dev, int on)
 
 static const struct driver_info	cdc_info = {
 	.description =	"CDC Ethernet Device",
-	.flags =	FLAG_ETHER,
+	.flags =	FLAG_ETHER | FLAG_POINTTOPOINT,
 	// .check_connect = cdc_check_connect,
-	.bind =		cdc_bind,
+	.bind =		usbnet_cdc_bind,
 	.unbind =	usbnet_cdc_unbind,
 	.status =	usbnet_cdc_status,
 	.manage_power =	cdc_manage_power,
 };
 
-static const struct driver_info mbm_info = {
+static const struct driver_info wwan_info = {
 	.description =	"Mobile Broadband Network Device",
 	.flags =	FLAG_WWAN,
-	.bind = 	cdc_bind,
+	.bind =		usbnet_cdc_bind,
 	.unbind =	usbnet_cdc_unbind,
 	.status =	usbnet_cdc_status,
 	.manage_power =	cdc_manage_power,
@@ -503,6 +471,7 @@ static const struct driver_info mbm_info = {
 
 /*-------------------------------------------------------------------------*/
 
+#define HUAWEI_VENDOR_ID	0x12D1
 
 static const struct usb_device_id	products [] = {
 /*
@@ -594,6 +563,33 @@ static const struct usb_device_id	products [] = {
 	.driver_info		= 0,
 },
 
+/* LG Electronics VL600 wants additional headers on every frame */
+{
+	USB_DEVICE_AND_INTERFACE_INFO(0x1004, 0x61aa, USB_CLASS_COMM,
+			USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
+	.driver_info = (unsigned long)&wwan_info,
+},
+
+/* PH450 */
+{
+	.match_flags = USB_DEVICE_ID_MATCH_INT_INFO
+		| USB_DEVICE_ID_MATCH_DEVICE,
+	USB_DEVICE(0x1983,0x0310),
+	.driver_info = (unsigned long)&wwan_info,
+}, {
+	.match_flags = USB_DEVICE_ID_MATCH_INT_INFO
+		| USB_DEVICE_ID_MATCH_DEVICE,
+	USB_DEVICE(0x1983,0x0321),
+	.driver_info = (unsigned long)&wwan_info,
+},
+
+/* Tango module */
+{
+	.match_flags = USB_DEVICE_ID_MATCH_INT_INFO
+		 | USB_DEVICE_ID_MATCH_DEVICE,
+	USB_DEVICE(0x0489,0xE03A),
+	.driver_info = (unsigned long)&wwan_info,
+},
 /*
  * WHITELIST!!!
  *
@@ -612,8 +608,17 @@ static const struct usb_device_id	products [] = {
 }, {
 	USB_INTERFACE_INFO(USB_CLASS_COMM, USB_CDC_SUBCLASS_MDLM,
 			USB_CDC_PROTO_NONE),
-	.driver_info = (unsigned long)&mbm_info,
+	.driver_info = (unsigned long)&wwan_info,
 
+}, {
+	/* Various Huawei modems with a network port like the UMG1831 */
+	.match_flags    =   USB_DEVICE_ID_MATCH_VENDOR
+		 | USB_DEVICE_ID_MATCH_INT_INFO,
+	.idVendor               = HUAWEI_VENDOR_ID,
+	.bInterfaceClass	= USB_CLASS_COMM,
+	.bInterfaceSubClass	= USB_CDC_SUBCLASS_ETHERNET,
+	.bInterfaceProtocol	= 255,
+	.driver_info = (unsigned long)&wwan_info,
 },
 	{ },		// END
 };

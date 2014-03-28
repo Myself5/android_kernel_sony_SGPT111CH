@@ -29,6 +29,7 @@
 #include <linux/utsname.h>
 #include <linux/uaccess.h>
 #include <linux/random.h>
+#include <linux/hw_breakpoint.h>
 
 #include <asm/cacheflush.h>
 #include <asm/leds.h>
@@ -92,6 +93,10 @@ __setup("hlt", hlt_setup);
 
 void arm_machine_restart(char mode, const char *cmd)
 {
+	/* Disable interrupts first */
+	local_irq_disable();
+	local_fiq_disable();
+
 	/*
 	 * Tell the mm system that we are going to reboot -
 	 * we may need it to insert some 1:1 mappings so that
@@ -131,18 +136,36 @@ EXPORT_SYMBOL(pm_power_off);
 void (*arm_pm_restart)(char str, const char *cmd) = arm_machine_restart;
 EXPORT_SYMBOL_GPL(arm_pm_restart);
 
+static void do_nothing(void *unused)
+{
+}
+
+/*
+ * cpu_idle_wait - Used to ensure that all the CPUs discard old value of
+ * pm_idle and update to new pm_idle value. Required while changing pm_idle
+ * handler on SMP systems.
+ *
+ * Caller must have changed pm_idle to the new value before the call. Old
+ * pm_idle value will not be used by any CPU after the return of this function.
+ */
+void cpu_idle_wait(void)
+{
+	smp_mb();
+	/* kick all the CPUs so that they exit out of pm_idle */
+	smp_call_function(do_nothing, NULL, 1);
+}
+EXPORT_SYMBOL_GPL(cpu_idle_wait);
 
 /*
  * This is our default idle handler.  We need to disable
  * interrupts here to ensure we don't miss a wakeup call.
  */
-void default_idle(void)
+static void default_idle(void)
 {
 	if (!need_resched())
 		arch_idle();
 	local_irq_enable();
 }
-EXPORT_SYMBOL(default_idle);
 
 void (*pm_idle)(void) = default_idle;
 EXPORT_SYMBOL(pm_idle);
@@ -168,6 +191,9 @@ void cpu_idle(void)
 #endif
 
 			local_irq_disable();
+#ifdef CONFIG_PL310_ERRATA_769419
+			wmb();
+#endif
 			if (hlt_counter) {
 				local_irq_enable();
 				cpu_relax();
@@ -191,19 +217,6 @@ void cpu_idle(void)
 		preempt_disable();
 	}
 }
-
-#if defined(CONFIG_ARCH_HAS_CPU_IDLE_WAIT)
-static void do_nothing(void *unused)
-{
-}
-
-void cpu_idle_wait(void)
-{
-	smp_mb();
-	smp_call_function(do_nothing, NULL, 1);
-}
-#endif
-
 
 static char reboot_mode = 'h';
 
@@ -237,10 +250,6 @@ void machine_power_off(void)
 
 void machine_restart(char *cmd)
 {
-	/* Disable interrupts first */
-	local_irq_disable();
-	local_fiq_disable();
-
 	machine_shutdown();
 	arm_pm_restart(reboot_mode, cmd);
 }
@@ -404,6 +413,8 @@ void flush_thread(void)
 	struct thread_info *thread = current_thread_info();
 	struct task_struct *tsk = current;
 
+	flush_ptrace_hw_breakpoint(tsk);
+
 	memset(thread->used_cp, 0, sizeof(thread->used_cp));
 	memset(&tsk->thread.debug, 0, sizeof(struct debug_info));
 	memset(&thread->fpstate, 0, sizeof(union fp_state));
@@ -432,8 +443,12 @@ copy_thread(unsigned long clone_flags, unsigned long stack_start,
 	thread->cpu_context.sp = (unsigned long)childregs;
 	thread->cpu_context.pc = (unsigned long)ret_from_fork;
 
+	clear_ptrace_hw_breakpoint(p);
+
 	if (clone_flags & CLONE_SETTLS)
 		thread->tp_value = regs->ARM_r3;
+
+	thread_notify(THREAD_NOTIFY_COPY, thread);
 
 	return 0;
 }
@@ -545,3 +560,26 @@ unsigned long arch_randomize_brk(struct mm_struct *mm)
 	unsigned long range_end = mm->brk + 0x02000000;
 	return randomize_range(mm->brk, range_end, 0) ? : mm->brk;
 }
+
+#ifdef CONFIG_MMU
+/*
+ * The vectors page is always readable from user space for the
+ * atomic helpers and the signal restart code.  Let's declare a mapping
+ * for it so it is visible through ptrace and /proc/<pid>/mem.
+ */
+
+int vectors_user_mapping(void)
+{
+	struct mm_struct *mm = current->mm;
+	return install_special_mapping(mm, 0xffff0000, PAGE_SIZE,
+				       VM_READ | VM_EXEC |
+				       VM_MAYREAD | VM_MAYEXEC |
+				       VM_ALWAYSDUMP | VM_RESERVED,
+				       NULL);
+}
+
+const char *arch_vma_name(struct vm_area_struct *vma)
+{
+	return (vma->vm_start == 0xffff0000) ? "[vectors]" : NULL;
+}
+#endif

@@ -1,6 +1,6 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.
@@ -30,8 +30,6 @@
 #include <linux/input/nbx_touch.h>
 #include <linux/nbx_ec_ipc_lidsw.h>
 #include <linux/nbx_ec_ipc_acplug.h>
-
-#define DEBUG_INFO_TP
 
 #ifdef DEBUG_INFO_TP
 #include <linux/io.h>
@@ -110,6 +108,10 @@ static int tp_power_status = 0;
 #define AC_NOISE_FILTER_DEFAULT_ON  (1)
 #define AC_NOISE_FILTER_DEFAULT_OFF (2)
 static int ac_filter_change = AC_NOISE_FILTER_AC_CONFIRM;
+
+#define LID_OPEN             (0)
+#define LID_CLOSE            (1)
+static int lid_state_flag = LID_OPEN;
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 struct early_suspend early_suspend;
@@ -243,6 +245,31 @@ static int nbx_touch_read(struct i2c_client* client, u8 size, u8* value){
 	}
 
 	memcpy(value, data_buf, size);
+
+	return err;
+}
+
+static int nbx_touch_read_from_addr(struct i2c_client* client, u8 addr, u8 size, u8* value){
+	int err;
+	struct i2c_msg msg[2];
+
+	if (!client->adapter){
+		return -ENODEV;
+	}
+
+	msg[0].addr = client->addr;
+	msg[0].flags = 0;
+	msg[0].len = 1;
+	msg[0].buf = &addr;
+	msg[1].addr = client->addr;
+	msg[1].flags = 1;
+	msg[1].len = size;
+	msg[1].buf = value;
+
+	err = i2c_transfer(client->adapter, msg, 2);
+	if (err < 0){
+		return err;
+	}
 
 	return err;
 }
@@ -747,9 +774,9 @@ static void nbx_lid_changed(void){
 	lidsw_state = nbx_ec_ipc_lidsw_get_state();
 
 	if(lidsw_state == 0){
-		nbx_lid_open();
+		lid_state_flag = LID_OPEN;
 	}else if(lidsw_state == 1){
-		nbx_lid_close();
+		lid_state_flag = LID_CLOSE;
 	}
 	return;
 }
@@ -766,6 +793,10 @@ int nbx_touch_event_stop(int state){
 static void tma300_multi_touch_break(struct i2c_client* client){
 
 	struct nbx_touch_data* drv_data = i2c_get_clientdata(client);
+
+	if(lid_state_flag == LID_CLOSE){
+		return;
+	}
 
 	if(event_stop == 1){
 		return;
@@ -788,10 +819,9 @@ static void tma300_multi_touch_break(struct i2c_client* client){
 			printk(KERN_ALERT "lower off\n");
 		}
 	}
-	input_report_abs(drv_data->input_dev, ABS_MT_TOUCH_MAJOR, 0);
-	input_report_abs(drv_data->input_dev, ABS_MT_WIDTH_MAJOR, 0);
-	input_sync(drv_data->input_dev);
 
+	input_mt_sync(drv_data->input_dev);
+	input_sync(drv_data->input_dev);
 }
 
 static irqreturn_t nbx_touch_irq_handler(int irq, void* data){
@@ -809,6 +839,7 @@ static void multi_touch_work_5point(struct work_struct* work){
 #endif /* DEBUG_INFO_TP */
 
 	int i = 0;
+	int err;
 	int pressure = MAX_PRESSURE;
 
 	u16 x[MAX_FINGER_NUM];
@@ -882,9 +913,15 @@ static void multi_touch_work_5point(struct work_struct* work){
 	memset(z, 0xffff, sizeof(u8)*MAX_FINGER_NUM);
 	memset(finger_id, 0, sizeof(u8)*MAX_FINGER_NUM);
 
-	setting_addr = ADDR_FW_DATA;
-	nbx_touch_write(client, 1, &setting_addr);
-	nbx_touch_read(client, READ_BUFF_LEN_TMA300, value);
+	err = nbx_touch_read_from_addr(client, ADDR_FW_DATA, READ_BUFF_LEN_TMA300, value);
+	if ( err < 0 ) {
+		/* ignore err */
+		goto exit;
+	}
+
+	if(lid_state_flag == LID_CLOSE){
+		goto exit;
+	}
 
 	if(event_stop == 1){
 		goto exit;
@@ -1021,15 +1058,21 @@ static void multi_touch_work_5point(struct work_struct* work){
 	}
 #endif /* DEBUG_INFO_TP */
 
+	if ( all_finger_num > 0 ) {
+		input_report_key(input, BTN_TOUCH, 1);
+	}
+
 	for(i = 0; i < all_finger_num; i++){
 
-		input_report_abs(input, ABS_MT_TOUCH_MAJOR, pressure);
-		input_report_abs(input, ABS_MT_WIDTH_MAJOR, z[i]);
+		input_report_abs(input, ABS_MT_TOUCH_MAJOR, z[i]);
 		input_report_abs(input, ABS_MT_POSITION_X, x[i]);
 		input_report_abs(input, ABS_MT_POSITION_Y, y[i]);
 
 		input_mt_sync(input);
 
+	}
+	if ( all_finger_num == 0 ) {
+		input_mt_sync(input);
 	}
 	input_sync(input);
 
@@ -1094,12 +1137,19 @@ static int tma300_init(struct i2c_client* client,
 
 		s_input_dev->dev.parent = &(client->dev);
 		s_input_dev->id.version = version;
-		s_input_dev->evbit[0] = BIT(EV_KEY) | BIT(EV_ABS);
 
+		__set_bit(EV_ABS, s_input_dev->evbit);
+		__set_bit(EV_KEY, s_input_dev->evbit);
+		__set_bit(BTN_TOUCH, s_input_dev->keybit);
+
+		input_set_abs_params(s_input_dev, ABS_X,
+				X_MIN, X_MAX, 0, 0);
+		input_set_abs_params(s_input_dev, ABS_Y,
+				Y_MIN, Y_MAX, 0, 0);
 
 		input_set_abs_params(s_input_dev, ABS_MT_TOUCH_MAJOR,
 				     0,
-				     MAX_PRESSURE,
+				     MAX_WIDTH, /*MAX_PRESSURE,*/
 				     0, 0);
 
 		input_set_abs_params(s_input_dev, ABS_MT_POSITION_X,
@@ -1112,10 +1162,6 @@ static int tma300_init(struct i2c_client* client,
 				     Y_MAX,
 				     0, 0);
 
-		input_set_abs_params(s_input_dev, ABS_MT_WIDTH_MAJOR,
-				     0,
-				     MAX_WIDTH,
-				     0, 0);
 		err = input_register_device(s_input_dev);
 		if(err){
 			printk(KERN_ALERT "touch screen input register device err=%d\n", err);
@@ -1351,13 +1397,7 @@ static int nbx_touch_probe(struct i2c_client* client,
 	}
 
 	msleep(1);
-	err = nbx_touch_write(client, 1, &setting_addr);
-	if(err < 0){
-		printk(KERN_ALERT "touch screen i2c write error=%d\n", err);
-		goto exit;
-	}
-
-	err = nbx_touch_read(client, 1, &version);
+	err = nbx_touch_read_from_addr(client, setting_addr, 1, &version);
 	if(err < 0){
 		printk(KERN_ALERT "touch screen i2c read error=%d\n", err);
 		goto exit;

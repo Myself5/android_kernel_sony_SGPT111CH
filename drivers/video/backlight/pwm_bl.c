@@ -1,4 +1,4 @@
-/* 2011-06-10: File changed by Sony Corporation */
+/* 2012-07-20: File changed by Sony Corporation */
 /*
  * linux/drivers/video/backlight/pwm_bl.c
  *
@@ -32,6 +32,7 @@ struct pwm_bl_data {
 	int			(*check_fb)(struct device *, struct fb_info *);
 };
 
+#ifdef CONFIG_MACH_NBX03
 /*
 ** conversion table
 ** from brightness(0-255) to backlight pwm(0-100)
@@ -71,11 +72,14 @@ static const int bl_tbl[256] = {
   7914, 8038, 8164, 8293, 8423, 8555, 8690, 8826, 8965, 9105, 
   9248, 9394, 9541, 9691, 9843, 9998, 
 };
+#endif
 static int pwm_backlight_update_status(struct backlight_device *bl)
 {
 	struct pwm_bl_data *pb = dev_get_drvdata(&bl->dev);
 	int brightness = bl->props.brightness;
-//	int max = bl->props.max_brightness;
+#ifndef CONFIG_MACH_NBX03
+	int max = bl->props.max_brightness;
+#endif
 
 	if (bl->props.power != FB_BLANK_UNBLANK)
 		brightness = 0;
@@ -90,9 +94,12 @@ static int pwm_backlight_update_status(struct backlight_device *bl)
 		pwm_config(pb->pwm, 0, pb->period);
 		pwm_disable(pb->pwm);
 	} else {
-//		brightness = pb->lth_brightness +
-//			(brightness * (pb->period - pb->lth_brightness) / max);
+#ifdef CONFIG_MACH_NBX03
 		brightness = pb->period / 10000 * bl_tbl[brightness];
+#else
+		brightness = pb->lth_brightness +
+			(brightness * (pb->period - pb->lth_brightness) / max);
+#endif
 		pwm_config(pb->pwm, brightness, pb->period);
 		pwm_enable(pb->pwm);
 	}
@@ -160,6 +167,7 @@ static int pwm_backlight_probe(struct platform_device *pdev)
 		dev_dbg(&pdev->dev, "got pwm for backlight\n");
 
 	memset(&props, 0, sizeof(struct backlight_properties));
+	props.type = BACKLIGHT_RAW;
 	props.max_brightness = data->max_brightness;
 	bl = backlight_device_register(dev_name(&pdev->dev), &pdev->dev, pb,
 				       &pwm_backlight_ops, &props);

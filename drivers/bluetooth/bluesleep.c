@@ -1,4 +1,4 @@
-/* 2011-06-11: File changed by Sony Corporation */
+/* 2011-12-08: File changed by Sony Corporation */
 /*
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -68,6 +68,9 @@
 #define POLARITY_LOW 0
 #define POLARITY_HIGH 1
 
+/* enable/disable wake-on-bluetooth */
+#define BT_ENABLE_IRQ_WAKE 1
+
 struct bluesleep_info {
 	unsigned host_wake;
 	unsigned ext_wake;
@@ -98,6 +101,7 @@ DECLARE_DELAYED_WORK(sleep_workqueue, bluesleep_sleep_work);
 #define BT_TXDATA	 0x02
 #define BT_ASLEEP	 0x04
 #define BT_EXT_WAKE	0x08
+#define BT_SUSPEND	0x10
 
 /* global pointer to a single hci device. */
 static struct hci_dev *bluesleep_hdev;
@@ -143,6 +147,8 @@ struct proc_dir_entry *bluetooth_dir, *sleep_dir;
  */
 static void hsuart_power(int on)
 {
+	if (test_bit(BT_SUSPEND, &flags))
+		return;
 	if (on) {
 		tegra_uart_request_clock_on(bsi->uport);
 		tegra_uart_set_mctrl(bsi->uport, TIOCM_RTS);
@@ -178,7 +184,6 @@ void bluesleep_sleep_wakeup(void)
 		set_bit(BT_EXT_WAKE, &flags);
 		clear_bit(BT_ASLEEP, &flags);
 		/*Activating UART */
-		hsuart_power(1);
 	}
 }
 
@@ -199,7 +204,6 @@ static void bluesleep_sleep_work(struct work_struct *work)
 			BT_DBG("going to sleep...");
 			set_bit(BT_ASLEEP, &flags);
 			/*Deactivating UART */
-			hsuart_power(0);
 			/* UART clk is not turned off immediately. Release
 			 * wakelock after 500 ms.
 			 */
@@ -285,10 +289,10 @@ static int bluesleep_hci_event(struct notifier_block *this,
 		}
 		break;
 	case HCI_DEV_UNREG:
+		bluesleep_stop();
 		bluesleep_hdev = NULL;
 		bsi->uport = NULL;
 		/* if bluetooth stopped, stop bluesleep also */
-		bluesleep_stop();
 		break;
 	case HCI_DEV_WRITE:
 		bluesleep_outgoing_data();
@@ -370,27 +374,13 @@ static int bluesleep_start(void)
 	if (bsi->has_ext_wake == 1)
 		gpio_set_value(bsi->ext_wake, 1);
 	set_bit(BT_EXT_WAKE, &flags);
-
-	if (bsi->irq_polarity == POLARITY_LOW) {
-		retval = request_irq(bsi->host_wake_irq, bluesleep_hostwake_isr,
-				IRQF_DISABLED | IRQF_TRIGGER_FALLING,
-				"bluetooth hostwake", NULL);
-	} else 	{
-		retval = request_irq(bsi->host_wake_irq, bluesleep_hostwake_isr,
-				IRQF_DISABLED | IRQF_TRIGGER_RISING,
-				"bluetooth hostwake", NULL);
-	}
-	if (retval  < 0) {
-		BT_ERR("Couldn't acquire BT_HOST_WAKE IRQ");
-		goto fail;
-	}
-
+#if BT_ENABLE_IRQ_WAKE
 	retval = enable_irq_wake(bsi->host_wake_irq);
 	if (retval < 0) {
 		BT_ERR("Couldn't enable BT_HOST_WAKE as wakeup interrupt");
-		free_irq(bsi->host_wake_irq, NULL);
 		goto fail;
 	}
+#endif
 	set_bit(BT_PROTO, &flags);
 	wake_lock(&bsi->wake_lock);
 	return 0;
@@ -428,9 +418,10 @@ static void bluesleep_stop(void)
 	atomic_inc(&open_count);
 	spin_unlock_irqrestore(&rw_lock, irq_flags);
 
+#if BT_ENABLE_IRQ_WAKE
 	if (disable_irq_wake(bsi->host_wake_irq))
 		BT_ERR("Couldn't disable hostwake IRQ wakeup mode\n");
-	free_irq(bsi->host_wake_irq, NULL);
+#endif
 	wake_lock_timeout(&bsi->wake_lock, HZ / 2);
 }
 /**
@@ -665,6 +656,21 @@ static int bluesleep_probe(struct platform_device *pdev)
 		bsi->irq_polarity = POLARITY_HIGH;/*anything else*/
 
 	wake_lock_init(&bsi->wake_lock, WAKE_LOCK_SUSPEND, "bluesleep");
+	clear_bit(BT_SUSPEND, &flags);
+
+	if (bsi->irq_polarity == POLARITY_LOW) {
+		ret = request_irq(bsi->host_wake_irq, bluesleep_hostwake_isr,
+				IRQF_DISABLED | IRQF_TRIGGER_FALLING,
+				"bluetooth hostwake", NULL);
+	} else {
+		ret = request_irq(bsi->host_wake_irq, bluesleep_hostwake_isr,
+				IRQF_DISABLED | IRQF_TRIGGER_RISING,
+				"bluetooth hostwake", NULL);
+	}
+	if (ret  < 0) {
+		BT_ERR("Couldn't acquire BT_HOST_WAKE IRQ");
+		goto free_bt_ext_wake;
+	}
 
 	return 0;
 
@@ -679,6 +685,7 @@ free_bsi:
 
 static int bluesleep_remove(struct platform_device *pdev)
 {
+	free_irq(bsi->host_wake_irq, NULL);
 	gpio_free(bsi->host_wake);
 	gpio_free(bsi->ext_wake);
 	wake_lock_destroy(&bsi->wake_lock);
@@ -686,9 +693,34 @@ static int bluesleep_remove(struct platform_device *pdev)
 	return 0;
 }
 
+
+static int bluesleep_resume(struct platform_device *pdev)
+{
+	if (test_bit(BT_SUSPEND, &flags)) {
+		BT_DBG("bluesleep resuming...\n");
+	if ((bsi->uport != NULL) &&
+		(gpio_get_value(bsi->host_wake) == bsi->irq_polarity)) {
+			BT_DBG("bluesleep resume form BT event...\n");
+			tegra_uart_request_clock_on(bsi->uport);
+			tegra_uart_set_mctrl(bsi->uport, TIOCM_RTS);
+		}
+		clear_bit(BT_SUSPEND, &flags);
+	}
+	return 0;
+}
+
+static int bluesleep_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	BT_DBG("bluesleep suspending...\n");
+	set_bit(BT_SUSPEND, &flags);
+	return 0;
+}
+
 static struct platform_driver bluesleep_driver = {
 	.probe = bluesleep_probe,
 	.remove = bluesleep_remove,
+	.suspend = bluesleep_suspend,
+	.resume = bluesleep_resume,
 	.driver = {
 		.name = "bluesleep",
 		.owner = THIS_MODULE,

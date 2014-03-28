@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * Header file for:
  * Cypress TrueTouch(TM) Standard Product (TTSP) touchscreen drivers.

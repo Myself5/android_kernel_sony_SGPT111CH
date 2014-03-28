@@ -76,7 +76,7 @@ EXPORT_SYMBOL(drm_mode_debug_printmodeline);
  * according to the hdisplay, vdisplay, vrefresh.
  * It is based from the VESA(TM) Coordinated Video Timing Generator by
  * Graham Loveridge April 9, 2003 available at
- * http://www.vesa.org/public/CVT/CVTd6r1.xls
+ * http://www.elo.utfsm.cl/~elo212/docs/CVTd6r1.xls 
  *
  * And it is copied from xf86CVTmode in xserver/hw/xfree86/modes/xf86cvt.c.
  * What I have done is to translate it by using integer calculation.
@@ -593,7 +593,7 @@ EXPORT_SYMBOL(drm_mode_height);
  *
  * Return @modes's hsync rate in kHz, rounded to the nearest int.
  */
-int drm_mode_hsync(struct drm_display_mode *mode)
+int drm_mode_hsync(const struct drm_display_mode *mode)
 {
 	unsigned int calc_val;
 
@@ -627,7 +627,7 @@ EXPORT_SYMBOL(drm_mode_hsync);
  * If it is 70.288, it will return 70Hz.
  * If it is 59.6, it will return 60Hz.
  */
-int drm_mode_vrefresh(struct drm_display_mode *mode)
+int drm_mode_vrefresh(const struct drm_display_mode *mode)
 {
 	int refresh = 0;
 	unsigned int calc_val;
@@ -725,7 +725,7 @@ EXPORT_SYMBOL(drm_mode_set_crtcinfo);
  * a pointer to it.  Used to create new instances of established modes.
  */
 struct drm_display_mode *drm_mode_duplicate(struct drm_device *dev,
-					    struct drm_display_mode *mode)
+					    const struct drm_display_mode *mode)
 {
 	struct drm_display_mode *nmode;
 	int new_id;

@@ -1,26 +1,39 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * arch/arm/mach-tegra/board-nbx03-sensors.c
  *
- * Copyright (c) 2010, NVIDIA, All Rights Reserved.
+ * Copyright (c) 2011, NVIDIA CORPORATION, All rights reserved.
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Redistributions in binary form must reproduce the above copyright
+ * notice, this list of conditions and the following disclaimer in the
+ * documentation and/or other materials provided with the distribution.
  *
+ * Neither the name of NVIDIA CORPORATION nor the names of its contributors
+ * may be used to endorse or promote products derived from this software
+ * without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+ * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+ * TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <linux/i2c.h>
-#include <linux/nct1008.h>
+#include <linux/nct1008_hc.h>
 
 #include <mach/gpio.h>
 
@@ -34,6 +47,10 @@
 #include <media/cmv59dx.h>
 #include <linux/delay.h>
 #include <linux/time.h>
+
+#include <linux/lis331dlh_1.h>
+#include <linux/ami304.h>
+#include <linux/l3g4200dh.h>
 
 #define NCT1008_THERM2_GPIO	TEGRA_GPIO_PN5
 
@@ -87,6 +104,16 @@ static void nbx03_nct1008_init(void)
 	gpio_direction_input(NCT1008_THERM2_GPIO);
 }
 
+static bool throttling_enable = false;
+
+static void xxx_tegra_throttling_enable(bool enable)
+{
+	if ( throttling_enable != enable ) {
+		throttling_enable = enable;
+		tegra_throttling_enable(enable);
+	}
+}
+
 static struct nct1008_platform_data nbx03_nct1008_pdata = {
 	.supported_hwrev = true,
 	.ext_range = false,
@@ -97,7 +124,7 @@ static struct nct1008_platform_data nbx03_nct1008_pdata = {
 	.shutdown_local_limit = 80,
 	.throttling_ext_limit = 75,
 	.throttling_local_limit = 65,
-	.alarm_fn = tegra_throttling_enable,
+	.alarm_fn = xxx_tegra_throttling_enable,
 };
 
 static struct i2c_board_info nbx03_i2c4_board_info[] = {
@@ -108,20 +135,50 @@ static struct i2c_board_info nbx03_i2c4_board_info[] = {
 	},
 };
 
+static struct lis331dlh_platform_data nbx03_lis331dlh_pdata = {
+	.transformation_matrix = {
+		 1,  0,  0,
+		 0,  1,  0,
+		 0,  0,  1,
+	},
+};
+
+static struct ami304_platform_data nbx03_ami304_pdata = {
+	.transformation_matrix = {
+		 1,  0,  0,
+		 0,  1,  0,
+		 0,  0,  1,
+	},
+};
+
+static struct l3g4200dh_platform_data nbx03_l3g4200dh_pdata = {
+	.transformation_matrix = {
+		 1,  0,  0,
+		 0,  1,  0,
+		 0,  0,  1,
+	},
+#ifdef CONFIG_NBX_L3G4200DH_HIGHSPEED
+	.odr = 100,
+#endif
+};
+
 static struct i2c_board_info nbx03_i2c_sensors_info[] = {
-#ifdef CONFIG_INPUT_NBX_ACCELEROMETER
+#ifdef CONFIG_INPUT_LIS331DLH
 	{
-		I2C_BOARD_INFO("nbx_accelerometer", 0x18), /* LIS331DLH */
+		I2C_BOARD_INFO("lis331dlh", 0x18), /* LIS331DLH */
+		.platform_data = &nbx03_lis331dlh_pdata,
 	},
 #endif
-#ifdef CONFIG_INPUT_NBX_MAGNETOMETER
+#ifdef CONFIG_INPUT_AMI304
 	{
-		I2C_BOARD_INFO("nbx_magnetometer", 0x0f), /* AMI304 */
+		I2C_BOARD_INFO("ami304", 0x0f), /* AMI304 */
+		.platform_data = &nbx03_ami304_pdata,
 	},
 #endif
-#ifdef CONFIG_INPUT_NBX_GYROSCOPE
+#ifdef CONFIG_INPUT_L3G4200DH
 	{
-		I2C_BOARD_INFO("nbx_gyroscope", 0x68), /* L3G4200DH */
+		I2C_BOARD_INFO("l3g4200dh", 0x68), /* L3G4200DH */
+		.platform_data = &nbx03_l3g4200dh_pdata,
 	},
 #endif
 };
@@ -147,7 +204,7 @@ int __init nbx03_sensors_init(void)
 	i2c_register_board_info(3, nbx03_i2c4_board_info,
 		ARRAY_SIZE(nbx03_i2c4_board_info));
 
-#if defined(CONFIG_INPUT_NBX_ACCELEROMETER) || defined(CONFIG_INPUT_NBX_MAGNETOMETER) || defined(CONFIG_INPUT_NBX_GYROSCOPE)
+#if defined(CONFIG_INPUT_LIS331DLH) || defined(CONFIG_INPUT_AMI304) || defined(CONFIG_INPUT_L3G4200DH)
 	i2c_register_board_info(0, nbx03_i2c_sensors_info,
 		ARRAY_SIZE(nbx03_i2c_sensors_info));
 #endif

@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * Copyright (C) 2010 NVIDIA, Inc.
  *
@@ -23,8 +23,8 @@
 #include <linux/regulator/machine.h>
 #include <linux/mfd/tps6586x.h>
 #include <linux/gpio.h>
-#include <mach/suspend.h>
 #include <linux/io.h>
+#include <linux/err.h>
 
 #include <mach/iomap.h>
 #include <mach/irqs.h>
@@ -35,7 +35,7 @@
 
 #include "gpio-names.h"
 #include "fuse.h"
-#include "power.h"
+#include "pm.h"
 #include "wakeups-t2.h"
 #include "board.h"
 #include "board-nbx03.h"
@@ -43,20 +43,10 @@
 #define PMC_CTRL		0x0
 #define PMC_CTRL_INTR_LOW	(1 << 17)
 
-#define CHARGING_DISABLE	TEGRA_GPIO_PR6
-
 #define TPS6586X_PPATH1		0x4c
 #define TPS6586X_STATS		0xbb
 
-#define NBX03_USBHOST_WAKELOCK
-
-int __init nbx03_charge_init(void)
-{
-	gpio_request(CHARGING_DISABLE, "chg_disable");
-	gpio_direction_output(CHARGING_DISABLE, 0);
-	tegra_gpio_enable(CHARGING_DISABLE);
-	return 0;
-}
+/*#define NBX03_USBHOST_WAKELOCK*/
 
 static struct regulator_consumer_supply tps658621_sm0_supply[] = {
 	REGULATOR_SUPPLY("vdd_core", NULL),
@@ -120,6 +110,7 @@ static struct regulator_consumer_supply tps658621_ldo9_supply[] = {
  */
 static struct tps6586x_settings sm1_config = {
 	.sm_pwm_mode = PWM_ONLY,
+	.slew_rate = SLEW_RATE_7040UV_PER_SEC,  /* POR default */
 };
 
 #define REGULATOR_INIT(_id, _minmv, _maxmv, on, config)			\
@@ -133,6 +124,7 @@ static struct tps6586x_settings sm1_config = {
 					   REGULATOR_CHANGE_STATUS |	\
 					   REGULATOR_CHANGE_VOLTAGE),	\
 			.always_on = on,				\
+			.apply_uV = 1,					\
 		},							\
 		.num_consumer_supplies = ARRAY_SIZE(tps658621_##_id##_supply),\
 		.consumer_supplies = tps658621_##_id##_supply,		\
@@ -163,7 +155,7 @@ static struct tps6586x_rtc_platform_data rtc_data = {
 		.month = 1,
 		.day = 1,
 	},
-	.cl_sel = TPS6586X_RTC_CL_SEL_1_5PF /* use lowest (external 20pF cap) */
+	.cl_sel = TPS6586X_RTC_CL_SEL_7_5PF,
 };
 
 #define TPS_REG(_id, _data)			\
@@ -223,13 +215,8 @@ static struct tegra_suspend_platform_data nbx03_suspend_data = {
 	.suspend_mode	= TEGRA_SUSPEND_LP0,
 	.core_timer	= 0x7e7e,
 	.core_off_timer = 0xf,
-	.separate_req	= true,
 	.corereq_high	= false,
 	.sysclkreq_high	= true,
-	.wake_enb	= TEGRA_WAKE_GPIO_PJ7,
-	.wake_high	= 0,
-	.wake_low	= TEGRA_WAKE_GPIO_PJ7,
-	.wake_any	= 0,
 };
 
 
@@ -286,7 +273,7 @@ static int __devinit vbusmon_probe(struct platform_device *pdev)
 
 	irq = TEGRA_NR_IRQS + TPS6586X_INT_USB_DET;
 	if ((ret = request_threaded_irq(irq, NULL, vbus_intr,
-	    IRQF_SHARED, "vbusmon", pdev)) < 0) {
+	    IRQF_SHARED | IRQF_NO_SUSPEND, "vbusmon", pdev)) < 0) {
 		printk("Request_irq ERROR ret = %d\n", ret);
 		return 0;
 	}

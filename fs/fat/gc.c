@@ -1,4 +1,3 @@
-/* 2011-06-10: File added by Sony Corporation */
 /*
  * linux/fs/fat/gc.c
  *

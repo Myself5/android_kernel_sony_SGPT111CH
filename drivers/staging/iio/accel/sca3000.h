@@ -91,7 +91,7 @@
 #define SCA3000_INT_STATUS_X_TRIGGER		0x02
 #define SCA3000_INT_STATUS_Z_TRIGGER		0x01
 
-/* Used to allow accesss to multiplexed registers */
+/* Used to allow access to multiplexed registers */
 #define SCA3000_REG_ADDR_CTRL_SEL		0x18
 /* Only available for SCA3000-D03 and SCA3000-D01 */
 #define SCA3000_REG_CTRL_SEL_I2C_DISABLE	0x01
@@ -185,7 +185,7 @@ struct sca3000_state {
 };
 
 /**
- * struct sca3000_chip_info - model dependant parameters
+ * struct sca3000_chip_info - model dependent parameters
  * @name: 			model identification
  * @scale:			string containing floating point scale factor
  * @temp_output:		some devices have temperature sensors.
@@ -213,7 +213,7 @@ struct sca3000_chip_info {
  * sca3000_read_data() read a series of values from the device
  * @dev:		device
  * @reg_address_high:	start address (decremented read)
- * @rx:			pointer where recieved data is placed. Callee
+ * @rx:			pointer where received data is placed. Callee
  *			responsible for freeing this.
  * @len:		number of bytes to read
  *

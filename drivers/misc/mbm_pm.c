@@ -27,6 +27,23 @@
 #include <linux/suspend.h>
 #include <linux/percpu.h>
 
+#define DRIVER_NAME "mbm_pm"
+#undef VERBOSE_DEBUG
+
+#define dbg(STR, ARGS...)                                  \
+        do {                                               \
+            printk("%s: " STR "\n" , DRIVER_NAME, ##ARGS); \
+        } while (0)                                        
+
+#ifdef VERBOSE_DEBUG
+#define vdbg(STR, ARGS...)                                            \
+        do {                                                          \
+            printk(KERN_DEBUG "%s: " STR "\n" , DRIVER_NAME, ##ARGS); \
+        } while (0)                                                   
+#else
+#define vdbg(STR, ARGS...) {}
+#endif
+
 pid_t s_mbm_pid = 0;
 
 #if defined(CONFIG_PM)
@@ -61,20 +78,22 @@ mbm_pm_notifier_show(struct kobject *kobj, struct kobj_attribute *attr,
     // Block if the value is not available yet.
     if (! sys_mbm_notifier)
     {
-        printk(KERN_INFO "%s: blocking\n", __func__);
-        wait_event_interruptible(mbm_pm_notifier_wait, sys_mbm_notifier);
+        vdbg("blocking");
+        if( wait_event_interruptible(mbm_pm_notifier_wait, sys_mbm_notifier )) {
+            return -ERESTARTSYS;
+        }
     }
 
     // In case of false wakeup, return "".
     if (! sys_mbm_notifier)
     {
-        printk(KERN_INFO "%s: false wakeup, returning with '\\n'\n", __func__);
+        dbg("false wakeup, returning with '\\n'");
         nchar = sprintf(buf, "\n");
         return nchar;
     }
 
     // Return the value, and clear.
-    printk(KERN_INFO "%s: returning with '%s'\n", __func__, sys_mbm_notifier);
+    dbg("returning with '%s'", sys_mbm_notifier);
     nchar = sprintf(buf, "%s\n", sys_mbm_notifier);
     sys_mbm_notifier = NULL;
     return nchar;
@@ -87,17 +106,17 @@ mbm_pm_notifier_store(struct kobject *kobj, struct kobj_attribute *attr,
 {
     if (!strncmp(buf, STRING_PM_CONTINUE, strlen(STRING_PM_CONTINUE))) {
         // Wake up pm_notifier.
-        printk(KERN_INFO "%s: PM_CONTINUE\n", __func__);
+        dbg("PM_CONTINUE");
         continue_ok = 1;
         wake_up(&mbm_ack_wait);
     }
     else if (!strncmp(buf, STRING_PM_SIGNAL, strlen(STRING_PM_SIGNAL))) {
         s_mbm_pid = 0;
         sscanf(buf, "%*s %d", &s_mbm_pid);
-        printk(KERN_INFO "%s: GPS HAL pid=%d\n", __func__, s_mbm_pid);
+        dbg("GPS HAL pid=%d", s_mbm_pid);
     }
     else {
-        printk(KERN_ERR "%s: wrong value '%s'\n", __func__, buf);
+        dbg("wrong value '%s'", buf);
     }
 
     return count;
@@ -118,7 +137,7 @@ static void notify_mbm(const char* notice)
 
     // In case daemon's pid is not reported, do not signal or wait.
     if (!s_mbm_pid) {
-        printk(KERN_ERR "%s: don't know GPS HAL pid\n", __func__);
+        dbg("don't know GPS HAL pid");
         return;
     }
 
@@ -129,10 +148,10 @@ static void notify_mbm(const char* notice)
     wake_up(&mbm_pm_notifier_wait);
 
     // Wait for the reply from GPS HAL.
-    printk(KERN_INFO "%s: wait for GPS HAL\n", __func__);
+    vdbg("wait for GPS HAL");
     if (wait_event_timeout(mbm_ack_wait,
                    continue_ok, timeout) == 0) {
-        printk(KERN_ERR "%s: timed out. GPS HAL did not reply\n", __func__);
+        dbg("timed out. GPS HAL did not reply");
     }
 
     // Go back to the initial state.
@@ -142,7 +161,7 @@ static void notify_mbm(const char* notice)
 int mbm_pm_notifier(struct notifier_block *nb,
                       unsigned long event, void *nouse)
 {
-    printk(KERN_INFO "%s: start processing event=%lx\n", __func__, event);
+    vdbg("start processing event=%lx", event);
 
     // Notify the event to GPS HAL.
     switch (event) {
@@ -153,11 +172,11 @@ int mbm_pm_notifier(struct notifier_block *nb,
         notify_mbm(STRING_PM_POST_SUSPEND);
         break;
     default:
-        printk(KERN_ERR "%s: unknown event %ld\n", __func__, event);
+        dbg("unknown event %ld", event);
         return NOTIFY_DONE;
     }
 
-    printk(KERN_INFO "%s: finished processing event=%ld\n", __func__, event);
+    vdbg("finished processing event=%ld", event);
     return NOTIFY_OK;
 }
 #endif
@@ -166,14 +185,14 @@ int mbm_pm_notifier(struct notifier_block *nb,
 static int __init mbm_pm_init(void)
 {
     int ret = 0;
-    printk(KERN_INFO "%s called\n", __func__);
+    dbg("init");
 
     #if defined(CONFIG_PM)
     // Create /sys/power/gps/notifier.
     mbm_kobj = kobject_create_and_add("gps", power_kobj);
     ret = sysfs_create_file(mbm_kobj, &mbm_pm_notifier_attribute.attr);
     if(ret) {
-        printk(KERN_ERR "%s: entry with the given name already exists\n", __func__);
+        dbg("entry with the given name already exists");
         return ret;
     }
 
@@ -192,7 +211,7 @@ static int __init mbm_pm_init(void)
 
 static void __exit mbm_pm_deinit(void)
 {
-    printk(KERN_INFO "%s called\n", __func__);
+    dbg("deinit");
 }
 
 module_init(mbm_pm_init);

@@ -1,4 +1,4 @@
-/* 2011-06-10: File changed by Sony Corporation */
+/* 2012-07-20: File changed by Sony Corporation */
 /* drivers/rtc/alarm.c
  *
  * Copyright (C) 2007-2009 Google, Inc.
@@ -98,7 +98,7 @@ static void update_timer_locked(struct alarm_queue *base, bool head_removed)
 	}
 
 	hrtimer_try_to_cancel(&base->timer);
-	base->timer._expires = ktime_add(base->delta, alarm->expires);
+	base->timer.node.expires = ktime_add(base->delta, alarm->expires);
 	base->timer._softexpires = ktime_add(base->delta, alarm->softexpires);
 	hrtimer_start_expires(&base->timer, HRTIMER_MODE_ABS);
 }
@@ -260,7 +260,7 @@ int alarm_set_rtc(struct timespec new_time)
 		rtc_new_rtc_time.tm_mday,
 		rtc_new_rtc_time.tm_year + 1900);
 
-#if defined(CONFIG_MACH_NBX02) || defined(CONFIG_MACH_NBX03)
+#if defined(CONFIG_MACH_NBX02) || defined(CONFIG_MACH_NBX03) || defined(CONFIG_MACH_TXS03)
 	mutex_lock(&alarm_setrtc_mutex);
 	wake_lock(&alarm_rtc_wake_lock);
 
@@ -410,7 +410,7 @@ static int alarm_suspend(struct platform_device *pdev, pm_message_t state)
 
 	hrtimer_cancel(&alarms[ANDROID_ALARM_RTC_WAKEUP].timer);
 	hrtimer_cancel(&alarms[
-			ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP_MASK].timer);
+			ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP].timer);
 
 	tmp_queue = &alarms[ANDROID_ALARM_RTC_WAKEUP];
 	if (tmp_queue->first)

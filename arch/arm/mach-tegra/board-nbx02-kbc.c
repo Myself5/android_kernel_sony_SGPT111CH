@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * Copyright (C) 2010 NVIDIA, Inc.
  *
@@ -34,33 +34,27 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
+#include "devices.h"
+
 #define NBX02_ROW_COUNT		3
 #define NBX02_COL_COUNT		6
 
-static int plain_kbd_keycode[] = {
-	KEY_RESERVED, KEY_RESERVED, KEY_RESERVED, KEY_RESERVED,
-		KEY_VOLUMEUP, KEY_VOLUMEDOWN,
-	KEY_RESERVED, KEY_RESERVED, KEY_RESERVED, KEY_RESERVED,
-		KEY_RESERVED, KEY_RESERVED,
-	KEY_RESERVED, KEY_RESERVED, KEY_RESERVED, KEY_RESERVED,
-		KEY_RESERVED, KEY_RESERVED,
+static const u32 nbx02_keymap[] = {
+	KEY(0, 4, KEY_VOLUMEUP),
+	KEY(0, 5, KEY_VOLUMEDOWN),
 };
 
-static struct tegra_kbc_wake_key nbx02_wake_cfg[] = {
-	/* none */
+static const struct matrix_keymap_data nbx02_keymap_data = {
+	.keymap = nbx02_keymap,
+	.keymap_size = ARRAY_SIZE(nbx02_keymap),
 };
-
 
 static struct tegra_kbc_platform_data nbx02_kbc_platform_data = {
 	.debounce_cnt = 20,
 	.repeat_cnt = 50 * 32,
-	.scan_timeout_cnt = 3000 * 32,
-	.plain_keycode = plain_kbd_keycode,
-	.fn_keycode = NULL,
-	.is_filter_keys = false,
-	.is_wake_on_any_key = false,
-	.wake_key_cnt = ARRAY_SIZE(nbx02_wake_cfg),
-	.wake_cfg = &nbx02_wake_cfg[0],
+	.keymap_data = &nbx02_keymap_data,
+	.use_fn_map = false,
+	.wakeup = false,
 };
 
 
@@ -77,6 +71,25 @@ static struct resource nbx02_kbc_resources[] = {
 	},
 };
 
+
+#include <linux/delay.h>
+#include <linux/io.h>
+
+static void tegra_assert_kbc_reset(int r)
+{
+
+	void __iomem *reset = IO_ADDRESS(TEGRA_PMC_BASE + 0x00);
+	u32 reg;
+
+	reg = readl(reset);
+
+	if ( r ) {
+		reg |= 0x08;
+	} else {
+		reg &= ~0x08;
+	}
+	writel(reg, reset);
+}
 
 struct platform_device nbx02_kbc_device = {
 	.name = "tegra-kbc",
@@ -95,20 +108,18 @@ int __init nbx02_kbc_init(void)
 
 	pr_info("KBC: nbx02_kbc_init\n");
 
-        /*
-         * Setup the pin configuration information.
-         */
-	for (i = 0; i < KBC_MAX_GPIO; i++) {
-		data->pin_cfg[i].num = 0;
-		data->pin_cfg[i].pin_type = kbc_pin_unused;
-	}
+	tegra_assert_kbc_reset(1);
+	udelay(100);
+	tegra_assert_kbc_reset(0);
+
 	for (i = 0; i < NBX02_ROW_COUNT; i++) {
 		data->pin_cfg[i].num = i;
-		data->pin_cfg[i].pin_type = kbc_pin_row;
+		data->pin_cfg[i].is_row = true;
+		data->pin_cfg[i].en = true;
 	}
 	for (i = 0; i < NBX02_COL_COUNT; i++) {
-		data->pin_cfg[i + NBX02_ROW_COUNT].num = i;
-		data->pin_cfg[i + NBX02_ROW_COUNT].pin_type = kbc_pin_col;
+		data->pin_cfg[i + KBC_MAX_ROW].num = i;
+		data->pin_cfg[i + KBC_MAX_ROW].en = true;
 	}
 
 	platform_device_register(&nbx02_kbc_device);

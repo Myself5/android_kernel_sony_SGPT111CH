@@ -54,10 +54,16 @@
 #define MCI_DPSM_MODE		(1 << 2)
 #define MCI_DPSM_DMAENABLE	(1 << 3)
 #define MCI_DPSM_BLOCKSIZE	(1 << 4)
-#define MCI_DPSM_RWSTART	(1 << 8)
-#define MCI_DPSM_RWSTOP		(1 << 9)
-#define MCI_DPSM_RWMOD		(1 << 10)
-#define MCI_DPSM_SDIOEN		(1 << 11)
+/* Control register extensions in the ST Micro U300 and Ux500 versions */
+#define MCI_ST_DPSM_RWSTART	(1 << 8)
+#define MCI_ST_DPSM_RWSTOP	(1 << 9)
+#define MCI_ST_DPSM_RWMOD	(1 << 10)
+#define MCI_ST_DPSM_SDIOEN	(1 << 11)
+/* Control register extensions in the ST Micro Ux500 versions */
+#define MCI_ST_DPSM_DMAREQCTL	(1 << 12)
+#define MCI_ST_DPSM_DBOOTMODEEN	(1 << 13)
+#define MCI_ST_DPSM_BUSYMODE	(1 << 14)
+#define MCI_ST_DPSM_DDRMODE	(1 << 15)
 
 #define MMCIDATACNT		0x030
 #define MMCISTATUS		0x034
@@ -131,21 +137,21 @@
 #define MCI_IRQENABLE	\
 	(MCI_CMDCRCFAILMASK|MCI_DATACRCFAILMASK|MCI_CMDTIMEOUTMASK|	\
 	MCI_DATATIMEOUTMASK|MCI_TXUNDERRUNMASK|MCI_RXOVERRUNMASK|	\
-	MCI_CMDRESPENDMASK|MCI_CMDSENTMASK|MCI_DATABLOCKENDMASK)
+	MCI_CMDRESPENDMASK|MCI_CMDSENTMASK)
 
-/*
- * The size of the FIFO in bytes.
- */
-#define MCI_FIFOSIZE	(16*4)
-	
-#define MCI_FIFOHALFSIZE (MCI_FIFOSIZE / 2)
+/* These interrupts are directed to IRQ1 when two IRQ lines are available */
+#define MCI_IRQ1MASK \
+	(MCI_RXFIFOHALFFULLMASK | MCI_RXDATAAVLBLMASK | \
+	 MCI_TXFIFOHALFEMPTYMASK)
 
 #define NR_SG		16
 
 struct clk;
 struct variant_data;
+struct dma_chan;
 
 struct mmci_host {
+	phys_addr_t		phybase;
 	void __iomem		*base;
 	struct mmc_request	*mrq;
 	struct mmc_command	*cmd;
@@ -154,8 +160,8 @@ struct mmci_host {
 	struct clk		*clk;
 	int			gpio_cd;
 	int			gpio_wp;
-
-	unsigned int		data_xfered;
+	int			gpio_cd_irq;
+	bool			singleirq;
 
 	spinlock_t		lock;
 
@@ -175,5 +181,16 @@ struct mmci_host {
 	struct sg_mapping_iter	sg_miter;
 	unsigned int		size;
 	struct regulator	*vcc;
+
+#ifdef CONFIG_DMA_ENGINE
+	/* DMA stuff */
+	struct dma_chan		*dma_current;
+	struct dma_chan		*dma_rx_channel;
+	struct dma_chan		*dma_tx_channel;
+
+#define dma_inprogress(host)	((host)->dma_current)
+#else
+#define dma_inprogress(host)	(0)
+#endif
 };
 

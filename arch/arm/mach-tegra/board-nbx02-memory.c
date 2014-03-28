@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * Copyright (C) 2010 NVIDIA, Inc.
  *
@@ -60,11 +60,11 @@ static const struct tegra_emc_table nbx02_emc_tables_elpida_1024[] = {
 			0x00000006,   /* TCLKSTABLE */
 			0x00000002,   /* TCLKSTOP */
 			0x00000068,   /* TREFBW */
-			0x00000003,   /* QUSE_EXTRA */
+			0x00000000,   /* QUSE_EXTRA */
 			0x00000003,   /* FBIO_CFG6 */
 			0x00000000,   /* ODT_WRITE */
 			0x00000000,   /* ODT_READ */
-			0x00000082,   /* FBIO_CFG5 */
+			0x00000282,   /* FBIO_CFG5 */
 			0xa06804ae,   /* CFG_DIG_DLL */
 			0x00070000,   /* DLL_XFORM_DQS */
 			0x00000000,   /* DLL_XFORM_QUSE */
@@ -111,118 +111,16 @@ static const struct tegra_emc_table nbx02_emc_tables_elpida_1024[] = {
 			0x00000006,   /* TCLKSTABLE */
 			0x00000002,   /* TCLKSTOP */
 			0x000000d0,   /* TREFBW */
-			0x00000004,   /* QUSE_EXTRA */
+			0x00000000,   /* QUSE_EXTRA */
 			0x00000000,   /* FBIO_CFG6 */
 			0x00000000,   /* ODT_WRITE */
 			0x00000000,   /* ODT_READ */
-			0x00000082,   /* FBIO_CFG5 */
+			0x00000282,   /* FBIO_CFG5 */
 			0xa06804ae,   /* CFG_DIG_DLL */
 			0x00070000,   /* DLL_XFORM_DQS */
 			0x00000000,   /* DLL_XFORM_QUSE */
 			0x00000000,   /* ZCAL_REF_CNT */
 			0x00000005,   /* ZCAL_WAIT_CNT */
-			0x00000000,   /* AUTO_CAL_INTERVAL */
-			0x00000000,   /* CFG_CLKTRIM_0 */
-			0x00000000,   /* CFG_CLKTRIM_1 */
-			0x00000000,   /* CFG_CLKTRIM_2 */
-		}
-	},
-	{
-		.rate = 75000,   /* SDRAM frequency */
-		.regs = {
-			0x00000005,   /* RC */
-			0x0000000a,   /* RFC */
-			0x00000004,   /* RAS */
-			0x00000003,   /* RP */
-			0x00000006,   /* R2W */
-			0x00000004,   /* W2R */
-			0x00000002,   /* R2P */
-			0x00000009,   /* W2P */
-			0x00000003,   /* RD_RCD */
-			0x00000003,   /* WR_RCD */
-			0x00000002,   /* RRD */
-			0x00000002,   /* REXT */
-			0x00000002,   /* WDV */
-			0x00000005,   /* QUSE */
-			0x00000003,   /* QRST */
-			0x00000008,   /* QSAFE */
-			0x0000000b,   /* RDV */
-			0x000000ff,   /* REFRESH */
-			0x00000000,   /* BURST_REFRESH_NUM */
-			0x00000003,   /* PDEX2WR */
-			0x00000003,   /* PDEX2RD */
-			0x00000003,   /* PCHG2PDEN */
-			0x00000008,   /* ACT2PDEN */
-			0x00000001,   /* AR2PDEN */
-			0x0000000a,   /* RW2PDEN */
-			0x0000000b,   /* TXSR */
-			0x00000003,   /* TCKE */
-			0x00000008,   /* TFAW */
-			0x00000004,   /* TRPAB */
-			0x00000006,   /* TCLKSTABLE */
-			0x00000002,   /* TCLKSTOP */
-			0x00000138,   /* TREFBW */
-			0x00000004,   /* QUSE_EXTRA */
-			0x00000000,   /* FBIO_CFG6 */
-			0x00000000,   /* ODT_WRITE */
-			0x00000000,   /* ODT_READ */
-			0x00000082,   /* FBIO_CFG5 */
-			0xa06804ae,   /* CFG_DIG_DLL */
-			0x00074000,   /* DLL_XFORM_DQS */
-			0x00000000,   /* DLL_XFORM_QUSE */
-			0x00000000,   /* ZCAL_REF_CNT */
-			0x00000007,   /* ZCAL_WAIT_CNT */
-			0x00000000,   /* AUTO_CAL_INTERVAL */
-			0x00000000,   /* CFG_CLKTRIM_0 */
-			0x00000000,   /* CFG_CLKTRIM_1 */
-			0x00000000,   /* CFG_CLKTRIM_2 */
-		}
-	},
-	{
-		.rate = 150000,   /* SDRAM frequency */
-		.regs = {
-			0x00000009,   /* RC */
-			0x00000014,   /* RFC */
-			0x00000007,   /* RAS */
-			0x00000003,   /* RP */
-			0x00000006,   /* R2W */
-			0x00000004,   /* W2R */
-			0x00000002,   /* R2P */
-			0x00000009,   /* W2P */
-			0x00000003,   /* RD_RCD */
-			0x00000003,   /* WR_RCD */
-			0x00000002,   /* RRD */
-			0x00000002,   /* REXT */
-			0x00000002,   /* WDV */
-			0x00000005,   /* QUSE */
-			0x00000003,   /* QRST */
-			0x00000008,   /* QSAFE */
-			0x0000000b,   /* RDV */
-			0x0000021f,   /* REFRESH */
-			0x00000000,   /* BURST_REFRESH_NUM */
-			0x00000003,   /* PDEX2WR */
-			0x00000003,   /* PDEX2RD */
-			0x00000003,   /* PCHG2PDEN */
-			0x00000008,   /* ACT2PDEN */
-			0x00000001,   /* AR2PDEN */
-			0x0000000a,   /* RW2PDEN */
-			0x00000015,   /* TXSR */
-			0x00000003,   /* TCKE */
-			0x00000008,   /* TFAW */
-			0x00000004,   /* TRPAB */
-			0x00000006,   /* TCLKSTABLE */
-			0x00000002,   /* TCLKSTOP */
-			0x00000270,   /* TREFBW */
-			0x00000004,   /* QUSE_EXTRA */
-			0x00000001,   /* FBIO_CFG6 */
-			0x00000000,   /* ODT_WRITE */
-			0x00000000,   /* ODT_READ */
-			0x00000082,   /* FBIO_CFG5 */
-			0xa04c04ae,   /* CFG_DIG_DLL */
-			0x007de010,   /* DLL_XFORM_DQS */
-			0x00000000,   /* DLL_XFORM_QUSE */
-			0x00000000,   /* ZCAL_REF_CNT */
-			0x0000000e,   /* ZCAL_WAIT_CNT */
 			0x00000000,   /* AUTO_CAL_INTERVAL */
 			0x00000000,   /* CFG_CLKTRIM_0 */
 			0x00000000,   /* CFG_CLKTRIM_1 */
@@ -318,11 +216,11 @@ static const struct tegra_emc_table nbx02_emc_tables_hynix_1024[] = {
 			0x00000006,   /* TCLKSTABLE */
 			0x00000002,   /* TCLKSTOP */
 			0x00000068,   /* TREFBW */
-			0x00000003,   /* QUSE_EXTRA */
+			0x00000000,   /* QUSE_EXTRA */
 			0x00000003,   /* FBIO_CFG6 */
 			0x00000000,   /* ODT_WRITE */
 			0x00000000,   /* ODT_READ */
-			0x00000082,   /* FBIO_CFG5 */
+			0x00000282,   /* FBIO_CFG5 */
 			0xa06804ae,   /* CFG_DIG_DLL */
 			0x00070000,   /* DLL_XFORM_DQS */
 			0x00000000,   /* DLL_XFORM_QUSE */
@@ -369,118 +267,16 @@ static const struct tegra_emc_table nbx02_emc_tables_hynix_1024[] = {
 			0x00000006,   /* TCLKSTABLE */
 			0x00000002,   /* TCLKSTOP */
 			0x000000d0,   /* TREFBW */
-			0x00000004,   /* QUSE_EXTRA */
+			0x00000000,   /* QUSE_EXTRA */
 			0x00000000,   /* FBIO_CFG6 */
 			0x00000000,   /* ODT_WRITE */
 			0x00000000,   /* ODT_READ */
-			0x00000082,   /* FBIO_CFG5 */
+			0x00000282,   /* FBIO_CFG5 */
 			0xa06804ae,   /* CFG_DIG_DLL */
 			0x00070000,   /* DLL_XFORM_DQS */
 			0x00000000,   /* DLL_XFORM_QUSE */
 			0x00000000,   /* ZCAL_REF_CNT */
 			0x00000005,   /* ZCAL_WAIT_CNT */
-			0x00000000,   /* AUTO_CAL_INTERVAL */
-			0x00000000,   /* CFG_CLKTRIM_0 */
-			0x00000000,   /* CFG_CLKTRIM_1 */
-			0x00000000,   /* CFG_CLKTRIM_2 */
-		}
-	},
-	{
-		.rate = 75000,   /* SDRAM frequency */
-		.regs = {
-			0x00000005,   /* RC */
-			0x0000000a,   /* RFC */
-			0x00000004,   /* RAS */
-			0x00000003,   /* RP */
-			0x00000006,   /* R2W */
-			0x00000004,   /* W2R */
-			0x00000002,   /* R2P */
-			0x00000009,   /* W2P */
-			0x00000003,   /* RD_RCD */
-			0x00000003,   /* WR_RCD */
-			0x00000002,   /* RRD */
-			0x00000002,   /* REXT */
-			0x00000002,   /* WDV */
-			0x00000005,   /* QUSE */
-			0x00000003,   /* QRST */
-			0x00000008,   /* QSAFE */
-			0x0000000b,   /* RDV */
-			0x000000ff,   /* REFRESH */
-			0x00000000,   /* BURST_REFRESH_NUM */
-			0x00000003,   /* PDEX2WR */
-			0x00000003,   /* PDEX2RD */
-			0x00000003,   /* PCHG2PDEN */
-			0x00000008,   /* ACT2PDEN */
-			0x00000001,   /* AR2PDEN */
-			0x0000000a,   /* RW2PDEN */
-			0x0000000b,   /* TXSR */
-			0x00000003,   /* TCKE */
-			0x00000008,   /* TFAW */
-			0x00000004,   /* TRPAB */
-			0x00000006,   /* TCLKSTABLE */
-			0x00000002,   /* TCLKSTOP */
-			0x00000138,   /* TREFBW */
-			0x00000004,   /* QUSE_EXTRA */
-			0x00000000,   /* FBIO_CFG6 */
-			0x00000000,   /* ODT_WRITE */
-			0x00000000,   /* ODT_READ */
-			0x00000082,   /* FBIO_CFG5 */
-			0xa06804ae,   /* CFG_DIG_DLL */
-			0x007d0010,   /* DLL_XFORM_DQS */
-			0x00000000,   /* DLL_XFORM_QUSE */
-			0x00000000,   /* ZCAL_REF_CNT */
-			0x00000007,   /* ZCAL_WAIT_CNT */
-			0x00000000,   /* AUTO_CAL_INTERVAL */
-			0x00000000,   /* CFG_CLKTRIM_0 */
-			0x00000000,   /* CFG_CLKTRIM_1 */
-			0x00000000,   /* CFG_CLKTRIM_2 */
-		}
-	},
-	{
-		.rate = 150000,   /* SDRAM frequency */
-		.regs = {
-			0x00000009,   /* RC */
-			0x00000014,   /* RFC */
-			0x00000007,   /* RAS */
-			0x00000003,   /* RP */
-			0x00000006,   /* R2W */
-			0x00000004,   /* W2R */
-			0x00000002,   /* R2P */
-			0x00000009,   /* W2P */
-			0x00000003,   /* RD_RCD */
-			0x00000003,   /* WR_RCD */
-			0x00000002,   /* RRD */
-			0x00000002,   /* REXT */
-			0x00000002,   /* WDV */
-			0x00000005,   /* QUSE */
-			0x00000003,   /* QRST */
-			0x00000008,   /* QSAFE */
-			0x0000000b,   /* RDV */
-			0x0000021f,   /* REFRESH */
-			0x00000000,   /* BURST_REFRESH_NUM */
-			0x00000003,   /* PDEX2WR */
-			0x00000003,   /* PDEX2RD */
-			0x00000003,   /* PCHG2PDEN */
-			0x00000008,   /* ACT2PDEN */
-			0x00000001,   /* AR2PDEN */
-			0x0000000a,   /* RW2PDEN */
-			0x00000015,   /* TXSR */
-			0x00000003,   /* TCKE */
-			0x00000008,   /* TFAW */
-			0x00000004,   /* TRPAB */
-			0x00000006,   /* TCLKSTABLE */
-			0x00000002,   /* TCLKSTOP */
-			0x00000270,   /* TREFBW */
-			0x00000004,   /* QUSE_EXTRA */
-			0x00000001,   /* FBIO_CFG6 */
-			0x00000000,   /* ODT_WRITE */
-			0x00000000,   /* ODT_READ */
-			0x00000082,   /* FBIO_CFG5 */
-			0xa04c04ae,   /* CFG_DIG_DLL */
-			0x007dc010,   /* DLL_XFORM_DQS */
-			0x00000000,   /* DLL_XFORM_QUSE */
-			0x00000000,   /* ZCAL_REF_CNT */
-			0x0000000e,   /* ZCAL_WAIT_CNT */
 			0x00000000,   /* AUTO_CAL_INTERVAL */
 			0x00000000,   /* CFG_CLKTRIM_0 */
 			0x00000000,   /* CFG_CLKTRIM_1 */

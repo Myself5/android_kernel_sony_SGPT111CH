@@ -1,4 +1,4 @@
-# 2011-06-10: File changed by Sony Corporation
+# 2012-07-20: File changed by Sony Corporation
 #
 # Backlight & LCD drivers configuration
 #
@@ -109,6 +109,14 @@ config LCD_S6E63M0
 	help
 	  If you have an S6E63M0 LCD Panel, say Y to enable its
 	  LCD control driver.
+
+config LCD_LD9040
+	tristate "LD9040 AMOLED LCD Driver"
+	depends on SPI && BACKLIGHT_CLASS_DEVICE
+	default n
+	help
+	  If you have an LD9040 Panel, say Y to enable its
+	  control driver.
 
 endif # LCD_CLASS_DEVICE
 
@@ -223,21 +231,14 @@ config BACKLIGHT_PWM
 	  If you have a LCD backlight adjustable by PWM, say Y to enable
 	  this driver.
 
-config BACKLIGHT_NBX02
-	tristate "nbx02 PWM based Backlight Driver"
-	depends on HAVE_PWM
-	help
-	  If you have a LCD backlight adjustable by nbx02, say Y to enable
-	  this driver.
-
 config BACKLIGHT_TEGRA_PWM
-	bool "Tegra2 PMx based PWM Backlight Driver"
-	depends on ARCH_TEGRA_2x_SOC && TEGRA_DC
+	bool "Tegra PMx based PWM Backlight Driver"
+	depends on TEGRA_DC
 	help
 	  Enable support for Tegra2 DC pwm backlight.
 
 	  If you have a pwm backlight adjustable by the DC PM0 or PM1 signal
-	  control on tegra2, say Y to enable this driver.
+	  control on tegra, say Y to enable this driver.
 
 config BACKLIGHT_DA903X
 	tristate "Backlight Driver for DA9030/DA9034 using WLED"
@@ -253,12 +254,12 @@ config BACKLIGHT_MAX8925
 	  If you have a LCD backlight connected to the WLED output of MAX8925
 	  WLED output, say Y here to enable this driver.
 
-config BACKLIGHT_MBP_NVIDIA
-       tristate "MacBook Pro Nvidia Backlight Driver"
-       depends on X86
+config BACKLIGHT_APPLE
+       tristate "Apple Backlight Driver"
+       depends on X86 && ACPI
        help
-         If you have an Apple Macbook Pro with Nvidia graphics hardware say Y
-	 to enable a driver for its backlight
+         If you have an Intel-based Apple say Y to enable a driver for its
+	 backlight.
 
 config BACKLIGHT_TOSA
 	tristate "Sharp SL-6000 Backlight Driver"
@@ -323,6 +324,28 @@ config BACKLIGHT_PCF50633
 	help
 	  If you have a backlight driven by a NXP PCF50633 MFD, say Y here to
 	  enable its driver.
+
+config BACKLIGHT_AAT2870
+	bool "AnalogicTech AAT2870 Backlight"
+	depends on BACKLIGHT_CLASS_DEVICE && MFD_AAT2870_CORE
+	default n
+	help
+	  If you have a AnalogicTech AAT2870 say Y to enable the
+	  backlight driver.
+
+config BACKLIGHT_NBX02
+	tristate "nbx02 PWM based Backlight Driver"
+	depends on HAVE_PWM
+	help
+	  If you have a LCD backlight adjustable by nbx02, say Y to enable
+	  this driver.
+
+config BACKLIGHT_TXS03
+	tristate "txs03 PWM based Backlight Driver"
+	depends on HAVE_PWM
+	help
+	  If you have a LCD backlight adjustable by txs03, say Y to enable
+	  this driver.
 
 endif # BACKLIGHT_CLASS_DEVICE
 

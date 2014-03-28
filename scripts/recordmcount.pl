@@ -130,6 +130,7 @@ if ($inputfile =~ m,kernel/trace/ftrace\.o$,) {
 # Acceptable sections to record.
 my %text_sections = (
      ".text" => 1,
+     ".ref.text" => 1,
      ".sched.text" => 1,
      ".spinlock.text" => 1,
      ".irqentry.text" => 1,
@@ -270,6 +271,8 @@ if ($arch eq "x86_64") {
 } elsif ($arch eq "arm") {
     $alignment = 2;
     $section_type = '%progbits';
+    $mcount_regex = "^\\s*([0-9a-fA-F]+):\\s*R_ARM_(CALL|PC24|THM_CALL)" .
+			"\\s+(__gnu_mcount_nc|mcount)\$";
 
 } elsif ($arch eq "ia64") {
     $mcount_regex = "^\\s*([0-9a-fA-F]+):.*\\s_mcount\$";

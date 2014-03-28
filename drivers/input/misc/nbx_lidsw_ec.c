@@ -1,6 +1,5 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011-2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.
@@ -12,17 +11,19 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/init.h>
 #include <linux/input.h>
-#include <linux/platform_device.h>
 
 #include <linux/nbx_ec_ipc.h>
 #include <linux/nbx_ec_ipc_lidsw.h>
 
 static struct input_dev* nbx_lidsw_ec_dev;
+
+static int only_once_after_resume;
 
 static void nbx_lidsw_ec_changed(void)
 {
@@ -33,12 +34,21 @@ static void nbx_lidsw_ec_changed(void)
 	lidsw_state = nbx_ec_ipc_lidsw_get_state();
 
 	if(0 <= lidsw_state) {
+		/* lid open & ec int factor is lid open then close -> open */
+		if(only_once_after_resume) {
+			if((lidsw_state == 0) && ec_ipc_get_ec_int_factor(EC_INT_LID) ){
+				input_report_switch(nbx_lidsw_ec_dev, SW_LID, 1);
+				input_sync(nbx_lidsw_ec_dev);
+			}
+		}
+		only_once_after_resume = 0;
+
 		input_report_switch(nbx_lidsw_ec_dev, SW_LID, lidsw_state);
 		input_sync(nbx_lidsw_ec_dev);
 	}
 }
 
-static int nbx_lidsw_ec_probe(struct platform_device* pdev)
+static int nbx_lidsw_ec_probe(struct nbx_ec_ipc_device* edev)
 {
 	int ret = 0;
 
@@ -65,7 +75,8 @@ static int nbx_lidsw_ec_probe(struct platform_device* pdev)
 		goto error_exit;
 	}
 
-	nbx_lidsw_ec_changed(); /* initialize */
+	only_once_after_resume = 0;
+	nbx_lidsw_ec_changed(); /* initial */
 
 	return 0;
 
@@ -78,7 +89,7 @@ error_exit:
 	return ret;
 }
 
-static int nbx_lidsw_ec_remove(struct platform_device* pdev)
+static int nbx_lidsw_ec_remove(struct nbx_ec_ipc_device* edev)
 {
 	input_unregister_device(nbx_lidsw_ec_dev);
 	input_free_device(nbx_lidsw_ec_dev);
@@ -88,15 +99,27 @@ static int nbx_lidsw_ec_remove(struct platform_device* pdev)
 	return 0;
 }
 
-static struct platform_driver nbx_lidsw_ec_driver = {
+#ifdef CONFIG_SUSPEND
+
+static int nbx_lidsw_ec_suspend(struct nbx_ec_ipc_device *edev)
+{
+	only_once_after_resume = 1;
+
+	return 0;
+}
+
+#else /* !CONFIG_SUSPEND */
+#define nbx_lidsw_ec_suspend NULL
+#endif /* CONFIG_SUSPEND */
+
+static struct nbx_ec_ipc_driver nbx_lidsw_ec_driver = {
 	.probe   = nbx_lidsw_ec_probe,
 	.remove  = nbx_lidsw_ec_remove,
-	.driver  = {
+	.suspend = nbx_lidsw_ec_suspend,
+	.drv  = {
 		.name = "nbx_lidsw",
 	},
 };
-
-static struct platform_device* nbx_lidsw_ec_platform_dev;
 
 static int __init nbx_lidsw_ec_init(void)
 {
@@ -104,27 +127,17 @@ static int __init nbx_lidsw_ec_init(void)
 
 	nbx_lidsw_ec_dev = NULL;
 
-	ret = platform_driver_register(&nbx_lidsw_ec_driver);
+	ret = nbx_ec_ipc_driver_register(&nbx_lidsw_ec_driver);
 	if (ret < 0) {
-		return ret;
-	}
-
-	nbx_lidsw_ec_platform_dev =
-		platform_device_register_simple("nbx_lidsw", 0, NULL, 0);
-	if (IS_ERR(nbx_lidsw_ec_platform_dev)) {
-		ret = PTR_ERR(nbx_lidsw_ec_platform_dev);
-		platform_driver_unregister(&nbx_lidsw_ec_driver);
+		pr_err("%s:nbx_ec_ipc_driver_register() failed, %d\n", __func__, ret);
 		return ret;
 	}
 
 	return 0;
-
-
 }
 static void  __exit nbx_lidsw_ec_exit(void)
 {
-	platform_device_unregister(nbx_lidsw_ec_platform_dev);
-	platform_driver_unregister(&nbx_lidsw_ec_driver);
+	nbx_ec_ipc_driver_unregister(&nbx_lidsw_ec_driver);
 }
 
 module_init(nbx_lidsw_ec_init);

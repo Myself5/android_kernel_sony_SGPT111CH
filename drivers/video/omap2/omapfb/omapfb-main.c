@@ -714,10 +714,10 @@ int check_fb_var(struct fb_info *fbi, struct fb_var_screeninfo *var)
 		var->pixclock = timings.pixel_clock != 0 ?
 			KHZ2PICOS(timings.pixel_clock) :
 			0;
-		var->left_margin = timings.hfp;
-		var->right_margin = timings.hbp;
-		var->upper_margin = timings.vfp;
-		var->lower_margin = timings.vbp;
+		var->left_margin = timings.hbp;
+		var->right_margin = timings.hfp;
+		var->upper_margin = timings.vbp;
+		var->lower_margin = timings.vfp;
 		var->hsync_len = timings.hsw;
 		var->vsync_len = timings.vsw;
 	} else {
@@ -2059,10 +2059,10 @@ static int omapfb_mode_to_timings(const char *mode_str,
 
 	if (r != 0) {
 		timings->pixel_clock = PICOS2KHZ(var.pixclock);
-		timings->hfp = var.left_margin;
-		timings->hbp = var.right_margin;
-		timings->vfp = var.upper_margin;
-		timings->vbp = var.lower_margin;
+		timings->hbp = var.left_margin;
+		timings->hfp = var.right_margin;
+		timings->vbp = var.upper_margin;
+		timings->vfp = var.lower_margin;
 		timings->hsw = var.hsync_len;
 		timings->vsw = var.vsync_len;
 		timings->x_res = var.xres;
@@ -2090,7 +2090,7 @@ static int omapfb_set_def_mode(struct omapfb2_device *fbdev,
 {
 	int r;
 	u8 bpp;
-	struct omap_video_timings timings;
+	struct omap_video_timings timings, temp_timings;
 
 	r = omapfb_mode_to_timings(mode_str, &timings, &bpp);
 	if (r)
@@ -2100,14 +2100,23 @@ static int omapfb_set_def_mode(struct omapfb2_device *fbdev,
 	fbdev->bpp_overrides[fbdev->num_bpp_overrides].bpp = bpp;
 	++fbdev->num_bpp_overrides;
 
-	if (!display->driver->check_timings || !display->driver->set_timings)
-		return -EINVAL;
+	if (display->driver->check_timings) {
+		r = display->driver->check_timings(display, &timings);
+		if (r)
+			return r;
+	} else {
+		/* If check_timings is not present compare xres and yres */
+		if (display->driver->get_timings) {
+			display->driver->get_timings(display, &temp_timings);
 
-	r = display->driver->check_timings(display, &timings);
-	if (r)
-		return r;
+			if (temp_timings.x_res != timings.x_res ||
+				temp_timings.y_res != timings.y_res)
+				return -EINVAL;
+		}
+	}
 
-	display->driver->set_timings(display, &timings);
+	if (display->driver->set_timings)
+			display->driver->set_timings(display, &timings);
 
 	return 0;
 }
@@ -2132,8 +2141,9 @@ static int omapfb_parse_def_modes(struct omapfb2_device *fbdev)
 	char *str, *options, *this_opt;
 	int r = 0;
 
-	str = kmalloc(strlen(def_mode) + 1, GFP_KERNEL);
-	strcpy(str, def_mode);
+	str = kstrdup(def_mode, GFP_KERNEL);
+	if (!str)
+		return -ENOMEM;
 	options = str;
 
 	while (!r && (this_opt = strsep(&options, ",")) != NULL) {
@@ -2197,6 +2207,16 @@ static int omapfb_probe(struct platform_device *pdev)
 		r = -ENOMEM;
 		goto err0;
 	}
+
+	/* TODO : Replace cpu check with omap_has_vrfb once HAS_FEATURE
+	*	 available for OMAP2 and OMAP3
+	*/
+	if (def_vrfb && !cpu_is_omap24xx() && !cpu_is_omap34xx()) {
+		def_vrfb = 0;
+		dev_warn(&pdev->dev, "VRFB is not supported on this hardware, "
+				"ignoring the module parameter vrfb=y\n");
+	}
+
 
 	mutex_init(&fbdev->mtx);
 

@@ -6,13 +6,14 @@
 
 obj-$(CONFIG_USB_SERIAL)			+= usbserial.o
 
-usbserial-obj-$(CONFIG_USB_SERIAL_CONSOLE)	+= console.o
-usbserial-obj-$(CONFIG_USB_EZUSB)		+= ezusb.o
+usbserial-y := usb-serial.o generic.o bus.o
 
-usbserial-objs	:= usb-serial.o generic.o bus.o $(usbserial-obj-y)
+usbserial-$(CONFIG_USB_SERIAL_CONSOLE)	+= console.o
+usbserial-$(CONFIG_USB_EZUSB)		+= ezusb.o
 
 obj-$(CONFIG_USB_SERIAL_AIRCABLE)		+= aircable.o
 obj-$(CONFIG_USB_SERIAL_ARK3116)		+= ark3116.o
+obj-$(CONFIG_USB_SERIAL_BASEBAND)		+= baseband_usb_chr.o
 obj-$(CONFIG_USB_SERIAL_BELKIN)			+= belkin_sa.o
 obj-$(CONFIG_USB_SERIAL_CH341)			+= ch341.o
 obj-$(CONFIG_USB_SERIAL_CP210X)			+= cp210x.o
@@ -48,6 +49,7 @@ obj-$(CONFIG_USB_SERIAL_PL2303)			+= pl2303.o
 obj-$(CONFIG_USB_SERIAL_QCAUX)			+= qcaux.o
 obj-$(CONFIG_USB_SERIAL_QUALCOMM)		+= qcserial.o
 obj-$(CONFIG_USB_SERIAL_SAFE)			+= safe_serial.o
+obj-$(CONFIG_USB_SERIAL_SAMBA)			+= sam-ba.o
 obj-$(CONFIG_USB_SERIAL_SIEMENS_MPI)		+= siemens_mpi.o
 obj-$(CONFIG_USB_SERIAL_SIERRAWIRELESS)		+= sierra.o
 obj-$(CONFIG_USB_SERIAL_SPCP8X5)		+= spcp8x5.o
@@ -58,6 +60,5 @@ obj-$(CONFIG_USB_SERIAL_TI)			+= ti_usb_3410_5052.o
 obj-$(CONFIG_USB_SERIAL_VISOR)			+= visor.o
 obj-$(CONFIG_USB_SERIAL_WHITEHEAT)		+= whiteheat.o
 obj-$(CONFIG_USB_SERIAL_XIRCOM)			+= keyspan_pda.o
-obj-$(CONFIG_USB_SERIAL_VIVOPAY_SERIAL)	+= vivopay-serial.o
+obj-$(CONFIG_USB_SERIAL_VIVOPAY_SERIAL)		+= vivopay-serial.o
 obj-$(CONFIG_USB_SERIAL_ZIO)			+= zio.o
-

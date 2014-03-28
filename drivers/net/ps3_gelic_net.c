@@ -632,7 +632,7 @@ static inline void gelic_card_enable_rxdmac(struct gelic_card *card)
  * @card: card structure
  *
  * gelic_card_disable_rxdmac terminates processing on the DMA controller by
- * turing off DMA and issueing a force end
+ * turing off DMA and issuing a force end
  */
 static inline void gelic_card_disable_rxdmac(struct gelic_card *card)
 {
@@ -642,7 +642,7 @@ static inline void gelic_card_disable_rxdmac(struct gelic_card *card)
 	status = lv1_net_stop_rx_dma(bus_id(card), dev_id(card), 0);
 	if (status)
 		dev_err(ctodev(card),
-			"lv1_net_stop_rx_dma faild, %d\n", status);
+			"lv1_net_stop_rx_dma failed, %d\n", status);
 }
 
 /**
@@ -650,7 +650,7 @@ static inline void gelic_card_disable_rxdmac(struct gelic_card *card)
  * @card: card structure
  *
  * gelic_card_disable_txdmac terminates processing on the DMA controller by
- * turing off DMA and issueing a force end
+ * turing off DMA and issuing a force end
  */
 static inline void gelic_card_disable_txdmac(struct gelic_card *card)
 {
@@ -660,7 +660,7 @@ static inline void gelic_card_disable_txdmac(struct gelic_card *card)
 	status = lv1_net_stop_tx_dma(bus_id(card), dev_id(card), 0);
 	if (status)
 		dev_err(ctodev(card),
-			"lv1_net_stop_tx_dma faild, status=%d\n", status);
+			"lv1_net_stop_tx_dma failed, status=%d\n", status);
 }
 
 /**
@@ -956,9 +956,9 @@ static void gelic_net_pass_skb_up(struct gelic_descr *descr,
 		    (!(data_error & GELIC_DESCR_DATA_ERROR_CHK_MASK)))
 			skb->ip_summed = CHECKSUM_UNNECESSARY;
 		else
-			skb->ip_summed = CHECKSUM_NONE;
+			skb_checksum_none_assert(skb);
 	} else
-		skb->ip_summed = CHECKSUM_NONE;
+		skb_checksum_none_assert(skb);
 
 	/* update netdevice statistics */
 	netdev->stats.rx_packets++;

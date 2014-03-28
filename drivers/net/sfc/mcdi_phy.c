@@ -1,6 +1,6 @@
 /****************************************************************************
  * Driver for Solarflare Solarstorm network controllers and boards
- * Copyright 2009 Solarflare Communications Inc.
+ * Copyright 2009-2010 Solarflare Communications Inc.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published
@@ -16,7 +16,6 @@
 #include "phy.h"
 #include "mcdi.h"
 #include "mcdi_pcol.h"
-#include "mdio_10g.h"
 #include "nic.h"
 #include "selftest.h"
 
@@ -450,7 +449,7 @@ void efx_mcdi_phy_check_fcntl(struct efx_nic *efx, u32 lpa)
 	struct efx_mcdi_phy_data *phy_cfg = efx->phy_data;
 	u32 rmtadv;
 
-	/* The link partner capabilities are only relevent if the
+	/* The link partner capabilities are only relevant if the
 	 * link supports flow control autonegotiation */
 	if (~phy_cfg->supported_cap & (1 << MC_CMD_PHY_CAP_AN_LBN))
 		return;
@@ -713,7 +712,8 @@ static int efx_mcdi_phy_run_tests(struct efx_nic *efx, int *results,
 	return 0;
 }
 
-const char *efx_mcdi_phy_test_name(struct efx_nic *efx, unsigned int index)
+static const char *efx_mcdi_phy_test_name(struct efx_nic *efx,
+					  unsigned int index)
 {
 	struct efx_mcdi_phy_data *phy_cfg = efx->phy_data;
 

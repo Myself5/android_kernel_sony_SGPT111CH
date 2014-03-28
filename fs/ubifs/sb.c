@@ -475,7 +475,8 @@ failed:
  * @c: UBIFS file-system description object
  *
  * This function returns a pointer to the superblock node or a negative error
- * code.
+ * code. Note, the user of this function is responsible of kfree()'ing the
+ * returned superblock buffer.
  */
 struct ubifs_sb_node *ubifs_read_sb_node(struct ubifs_info *c)
 {
@@ -542,11 +543,8 @@ int ubifs_read_superblock(struct ubifs_info *c)
 	 * due to the unavailability of time-travelling equipment.
 	 */
 	if (c->fmt_version > UBIFS_FORMAT_VERSION) {
-		struct super_block *sb = c->vfs_sb;
-		int mounting_ro = sb->s_flags & MS_RDONLY;
-
-		ubifs_assert(!c->ro_media || mounting_ro);
-		if (!mounting_ro ||
+		ubifs_assert(!c->ro_media || c->ro_mount);
+		if (!c->ro_mount ||
 		    c->ro_compat_version > UBIFS_RO_COMPAT_VERSION) {
 			ubifs_err("on-flash format version is w%d/r%d, but "
 				  "software only supports up to version "
@@ -624,7 +622,7 @@ int ubifs_read_superblock(struct ubifs_info *c)
 	c->old_leb_cnt = c->leb_cnt;
 	if (c->leb_cnt < c->vi.size && c->leb_cnt < c->max_leb_cnt) {
 		c->leb_cnt = min_t(int, c->max_leb_cnt, c->vi.size);
-		if (c->vfs_sb->s_flags & MS_RDONLY)
+		if (c->ro_mount)
 			dbg_mnt("Auto resizing (ro) from %d LEBs to %d LEBs",
 				c->old_leb_cnt,	c->leb_cnt);
 		else {

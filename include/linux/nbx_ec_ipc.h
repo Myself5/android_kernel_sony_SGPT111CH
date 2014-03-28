@@ -1,6 +1,5 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.
@@ -12,10 +11,12 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
+
 #ifndef __NBX_EC_IPC_H_INCLUDED__
 #define __NBX_EC_IPC_H_INCLUDED__
 
 #include <linux/types.h>
+#include <linux/device.h>
 
 /* send request packet and receive response packet, without timeout version */
 #define ec_ipc_send_request(pid, cid, buf, size, response_buf, response_buf_size) \
@@ -97,5 +98,51 @@ void ec_ipc_cancel_request(uint8_t pid, uint8_t cid, uint8_t frame_num);
 #define EC_IPC_PID_POWERSTATE   7
 #define EC_IPC_PID_TOPCOVER     8
 #define EC_IPC_PID_POWERKEY     9
+#define EC_IPC_PID_ECINT       10
+#define EC_IPC_PID_ACCAD       11
+#define EC_IPC_PID_USBSDP      12
+
+/*
+ * get EC INT factor at last suspend
+ *
+ * arg : "factor", query EC INT factor
+ *
+ * ret : occure EC INT queried factor
+ */
+int ec_ipc_get_ec_int_factor(uint8_t factor);
+
+#define EC_INT_POWERKEY (1 << 0)
+#define EC_INT_LID      (1 << 1)
+#define EC_INT_TOPCOVER (1 << 2)
+#define EC_INT_SHUTREQ  (1 << 3)
+#define EC_INT_AC       (1 << 4)
+
+struct nbx_ec_ipc_device {
+	const char* name;
+	struct device dev;
+};
+
+struct nbx_ec_ipc_driver {
+	int (*probe)(struct nbx_ec_ipc_device*);
+	int (*remove)(struct nbx_ec_ipc_device*);
+	void (*shutdown)(struct nbx_ec_ipc_device*);
+
+	int (*prepare_suspend)(struct nbx_ec_ipc_device*);
+	int (*suspend)(struct nbx_ec_ipc_device*);
+	int (*suspend_noirq)(struct nbx_ec_ipc_device*);
+	int (*resume_noirq)(struct nbx_ec_ipc_device*);
+	int (*resume)(struct nbx_ec_ipc_device*);
+	void (*complete_resume)(struct nbx_ec_ipc_device*);
+
+	struct device_driver drv;
+};
+
+int nbx_ec_ipc_device_register(struct nbx_ec_ipc_device* edev);
+void nbx_ec_ipc_device_unregister(struct nbx_ec_ipc_device* edev);
+int nbx_ec_ipc_driver_register(struct nbx_ec_ipc_driver* edrv);
+void nbx_ec_ipc_driver_unregister(struct nbx_ec_ipc_driver* edrv);
+
+int nbx_ec_ipc_core_device_register(struct nbx_ec_ipc_device* edev);
+void nbx_ec_ipc_core_device_unregister(struct nbx_ec_ipc_device* edev);
 
 #endif /* __NBX_EC_IPC_H_INCLUDED__ */

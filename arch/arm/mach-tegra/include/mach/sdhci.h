@@ -1,5 +1,5 @@
 /*
- * include/asm-arm/arch-tegra/sdhci.h
+ * include/asm-arm/arch-tegra/include/mach/sdhci.h
  *
  * Copyright (C) 2009 Palm, Inc.
  * Author: Yvonne Yip <y@palm.com>
@@ -18,27 +18,18 @@
 #define __ASM_ARM_ARCH_TEGRA_SDHCI_H
 
 #include <linux/mmc/host.h>
-#include <linux/mmc/card.h>
+#include <asm/mach/mmc.h>
 
 struct tegra_sdhci_platform_data {
-	const char *clk_id;
-	int force_hs;
 	int cd_gpio;
 	int wp_gpio;
 	int power_gpio;
-
-	void (*board_probe)(int id, struct mmc_host *);
-	void (*board_remove)(int id, struct mmc_host *);
-
-	/* embedded sdio data */
-	struct sdio_cis cis;
-	struct sdio_cccr cccr;
-	struct sdio_embedded_func *funcs;
-	int num_funcs;
-
-	/* card detect callback registration function */
-	int (*register_status_notify)(void (*callback)(int card_present,
-				void *dev_id), void *dev_id);
+	int enable_dpd;
+	int is_8bit;
+	unsigned int max_clk_limit;
+	unsigned int ddr_clk_limit;
+	unsigned int tap_delay;
+	struct mmc_platform_data mmc_data;
 };
 
 #endif

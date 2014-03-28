@@ -1,4 +1,4 @@
-/* 2011-06-10: File changed by Sony Corporation */
+/* 2012-07-20: File changed by Sony Corporation */
 /*
  * arch/arm/mach-tegra/tegra2_dvfs.c
  *
@@ -6,6 +6,8 @@
  *
  * Author:
  *	Colin Cross <ccross@google.com>
+ *
+ * Copyright (C) 2010-2011 NVIDIA Corporation
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -124,16 +126,16 @@ static struct dvfs_rail tegra2_dvfs_rail_vdd_aon = {
 };
 #endif /* NBX_WORKAROUND_DVFS_AP20H_VOLTABLE */
 
-/* vdd_core and vdd_aon must be 50 mV higher than vdd_cpu */
+/* vdd_core and vdd_aon must be 120 mV higher than vdd_cpu */
 static int tegra2_dvfs_rel_vdd_cpu_vdd_core(struct dvfs_rail *vdd_cpu,
 	struct dvfs_rail *vdd_core)
 {
 	if (vdd_cpu->new_millivolts > vdd_cpu->millivolts &&
-	    vdd_core->new_millivolts < vdd_cpu->new_millivolts + 50)
-		return vdd_cpu->new_millivolts + 50;
+	    vdd_core->new_millivolts < vdd_cpu->new_millivolts + 120)
+		return vdd_cpu->new_millivolts + 120;
 
-	if (vdd_core->new_millivolts < vdd_cpu->millivolts + 50)
-		return vdd_cpu->millivolts + 50;
+	if (vdd_core->new_millivolts < vdd_cpu->millivolts + 120)
+		return vdd_cpu->millivolts + 120;
 
 	return vdd_core->new_millivolts;
 }
@@ -149,13 +151,13 @@ static int tegra2_dvfs_rel_vdd_core_vdd_aon(struct dvfs_rail *vdd_core,
 
 static struct dvfs_relationship tegra2_dvfs_relationships[] = {
 	{
-		/* vdd_core must be 50 mV higher than vdd_cpu */
+		/* vdd_core must be 120 mV higher than vdd_cpu */
 		.from = &tegra2_dvfs_rail_vdd_cpu,
 		.to = &tegra2_dvfs_rail_vdd_core,
 		.solve = tegra2_dvfs_rel_vdd_cpu_vdd_core,
 	},
 	{
-		/* vdd_aon must be 50 mV higher than vdd_cpu */
+		/* vdd_aon must be 120 mV higher than vdd_cpu */
 		.from = &tegra2_dvfs_rail_vdd_cpu,
 		.to = &tegra2_dvfs_rail_vdd_aon,
 		.solve = tegra2_dvfs_rel_vdd_cpu_vdd_core,
@@ -218,26 +220,18 @@ static struct dvfs dvfs_init[] = {
 	/* Core voltages (mV):           950,    1000,   1100,   1200,   1225,   1275,   1300 */
 	CORE_DVFS("emc",     -1, 1, KHZ, 57000,  333000, 380000, 666000, 666000, 666000, 760000),
 
-#if 0
-	/*
-	 * The sdhci core calls the clock ops with a spinlock held, which
-	 * conflicts with the sleeping dvfs api.
-	 * For now, boards must ensure that the core voltage does not drop
-	 * below 1V, or that the sdmmc busses are set to 44 MHz or less.
-	 */
 	CORE_DVFS("sdmmc1",  -1, 1, KHZ, 44000,  52000,  52000,  52000,  52000,  52000,  52000),
 	CORE_DVFS("sdmmc2",  -1, 1, KHZ, 44000,  52000,  52000,  52000,  52000,  52000,  52000),
 	CORE_DVFS("sdmmc3",  -1, 1, KHZ, 44000,  52000,  52000,  52000,  52000,  52000,  52000),
 	CORE_DVFS("sdmmc4",  -1, 1, KHZ, 44000,  52000,  52000,  52000,  52000,  52000,  52000),
-#endif
 
 	CORE_DVFS("ndflash", -1, 1, KHZ, 130000, 150000, 158000, 164000, 164000, 164000, 164000),
 	CORE_DVFS("nor",     -1, 1, KHZ, 0,      92000,  92000,  92000,  92000,  92000,  92000),
 	CORE_DVFS("ide",     -1, 1, KHZ, 0,      0,      100000, 100000, 100000, 100000, 100000),
 	CORE_DVFS("mipi",    -1, 1, KHZ, 0,      40000,  40000,  40000,  40000,  60000,  60000),
-	CORE_DVFS("usbd",    -1, 1, KHZ, 0,      0,      0,      480000, 480000, 480000, 480000),
-	CORE_DVFS("usb2",    -1, 1, KHZ, 0,      0,      0,      480000, 480000, 480000, 480000),
-	CORE_DVFS("usb3",    -1, 1, KHZ, 0,      0,      0,      480000, 480000, 480000, 480000),
+	CORE_DVFS("usbd",    -1, 1, KHZ, 0,      0,      480000, 480000, 480000, 480000, 480000),
+	CORE_DVFS("usb2",    -1, 1, KHZ, 0,      0,      480000, 480000, 480000, 480000, 480000),
+	CORE_DVFS("usb3",    -1, 1, KHZ, 0,      0,      480000, 480000, 480000, 480000, 480000),
 	CORE_DVFS("pcie",    -1, 1, KHZ, 0,      0,      0,      250000, 250000, 250000, 250000),
 	CORE_DVFS("dsi",     -1, 1, KHZ, 100000, 100000, 100000, 500000, 500000, 500000, 500000),
 	CORE_DVFS("tvo",     -1, 1, KHZ, 0,      0,      0,      250000, 250000, 250000, 250000),
@@ -339,7 +333,7 @@ module_param_cb(disable_core, &tegra_dvfs_disable_core_ops,
 module_param_cb(disable_cpu, &tegra_dvfs_disable_cpu_ops,
 	&tegra_dvfs_cpu_disabled, 0644);
 
-void __init tegra2_init_dvfs(void)
+void __init tegra_soc_init_dvfs(void)
 {
 	int i;
 	struct clk *c;

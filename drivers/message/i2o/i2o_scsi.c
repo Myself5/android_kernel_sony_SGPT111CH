@@ -204,7 +204,7 @@ static int i2o_scsi_remove(struct device *dev)
  *	i2o_scsi_probe - verify if dev is a I2O SCSI device and install it
  *	@dev: device to verify if it is a I2O SCSI device
  *
- *	Retrieve channel, id and lun for I2O device. If everthing goes well
+ *	Retrieve channel, id and lun for I2O device. If everything goes well
  *	register the I2O device as SCSI device on the I2O SCSI controller.
  *
  *	Returns 0 on success or negative error code on failure.
@@ -506,7 +506,7 @@ static struct i2o_driver i2o_scsi_driver = {
  *	Locks: takes the controller lock on error path only
  */
 
-static int i2o_scsi_queuecommand(struct scsi_cmnd *SCpnt,
+static int i2o_scsi_queuecommand_lck(struct scsi_cmnd *SCpnt,
 				 void (*done) (struct scsi_cmnd *))
 {
 	struct i2o_controller *c;
@@ -688,7 +688,9 @@ static int i2o_scsi_queuecommand(struct scsi_cmnd *SCpnt,
 
       exit:
 	return rc;
-};
+}
+
+static DEF_SCSI_QCMD(i2o_scsi_queuecommand)
 
 /**
  *	i2o_scsi_abort - abort a running command

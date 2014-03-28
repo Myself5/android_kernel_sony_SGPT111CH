@@ -1,9 +1,9 @@
-# 2011-06-10: File added and changed by Sony Corporation
+# 2012-07-20: File added and changed by Sony Corporation
 # NBX EC IPC
 
 config NBX_EC_IPC
        tristate "Enable NBX EC IPC driver"
-       depends on MACH_NBX02 || MACH_NBX03
+       depends on MACH_NBX02 || MACH_NBX03 || MACH_TXS03
        help
          This option enables support NBX EC IPC
 
@@ -18,3 +18,9 @@ config NBX_EC_IPC_LID_SWITCH
        depends on NBX_EC_IPC
        help
          This option enables support NBX EC lid switch
+
+config NBX_EC_IPC_CHECK_EVENT_PACKET
+       tristate "Enable check NBX EC event packet is received"
+       depends on NBX_EC_IPC
+       help
+         This option enables check NBX EC event packet is received

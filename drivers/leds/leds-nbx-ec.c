@@ -1,6 +1,5 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.
@@ -12,18 +11,15 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
-/*
- * NBX EC LED support
- */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/platform_device.h>
 #include <linux/leds.h>
 #include <linux/err.h>
 #include <linux/workqueue.h>
 #include <linux/spinlock.h>
+#include <linux/suspend.h>
 #include <linux/wakelock.h>
 
 #include <linux/nbx_ec_ipc.h>
@@ -39,7 +35,8 @@ enum {
 };
 
 static struct workqueue_struct* nbx_ec_led_workqueue;
-static struct work_struct nbx_ec_led_work;
+static struct delayed_work nbx_ec_led_work;
+static int nbx_ec_led_work_block;
 
 struct nbx_ec_led_setting_t {
 	spinlock_t lock;
@@ -79,6 +76,11 @@ static void nbx_ec_led_info_b(struct led_classdev *led_cdev,
 	nbx_ec_led_brightness_set(NBX_EC_LED_ID_INFO, NBX_EC_LED_COLOR_B, value);
 }
 
+static void nbx_ec_led_info_blink_brightness(struct led_classdev *led_cdev,
+					enum led_brightness value)
+{
+	/* nothing to do. */
+}
 static int nbx_ec_led_info_blink(struct led_classdev *led_cdev,
 				unsigned long *delay_on,
 				unsigned long *delay_off)
@@ -104,6 +106,7 @@ static struct led_classdev nbx_ec_led_classdevs[] = {
 	},
 	{
 		.name           = "info:blink",
+		.brightness_set = nbx_ec_led_info_blink_brightness,
 		.blink_set      = nbx_ec_led_info_blink,
 		.default_trigger = "timer",
 	},
@@ -147,7 +150,10 @@ static void nbx_ec_led_set(struct work_struct* work)
 
 		spin_lock_irqsave(plock, flags);
 		do {
-			if(nbx_ec_led_setting[id].update == 0) break;
+			if(nbx_ec_led_setting[id].update == 0) {
+				wake_unlock(&(nbx_ec_led_setting[id].wake_lock));
+				break;
+			}
 			nbx_ec_led_setting[id].update = 0;
 
 			if(id == NBX_EC_LED_ID_INFO)
@@ -165,27 +171,33 @@ static void nbx_ec_led_set(struct work_struct* work)
 
 			spin_unlock_irqrestore(plock, flags);
 			{
-				ret = ec_ipc_send_request_timeout(EC_IPC_PID_LED, cid,
-								req_buf, sizeof(req_buf),
-								res_buf, sizeof(res_buf),
-								3000);
-
-				if(ret < (int)sizeof(res_buf)){
-					pr_err("leds-nbx-ec:ec_ipc_send_request failed %d\n", ret);
-				}
-				else if(res_buf[LED_RES_RESULT] != LED_RES_RESULT_OK) {
-					pr_err("leds-nbx-ec:ec_ipc_send_request result NG\n");
-				}
-
+				ret = ec_ipc_send_request(EC_IPC_PID_LED, cid,
+							req_buf, sizeof(req_buf),
+							res_buf, sizeof(res_buf));
 			}
 			spin_lock_irqsave(plock, flags);
+
+			if((ret < (int)sizeof(res_buf)) || (res_buf[LED_RES_RESULT] != LED_RES_RESULT_OK) ){
+				if(ret < (int)sizeof(res_buf))
+					pr_err("leds-nbx-ec:ec_ipc_send_request failed %d\n", ret);
+				else if(res_buf[LED_RES_RESULT] != LED_RES_RESULT_OK)
+					pr_err("leds-nbx-ec:ec_ipc_send_request result NG\n");
+
+				/* retry delayed 1sec */
+				nbx_ec_led_setting[id].update = 1;
+				if(nbx_ec_led_work_block == 0) {
+					queue_delayed_work(nbx_ec_led_workqueue, &nbx_ec_led_work, msecs_to_jiffies(1000));
+				}
+
+				break;
+			}
 
 			if(nbx_ec_led_setting[id].update == 0) {
 				wake_unlock(&(nbx_ec_led_setting[id].wake_lock));
 			}
 			else {
-				id--; /* again */
-				break;
+				/* update value in sending. send again. */
+				id--;
 			}
 
 		} while(0);
@@ -215,11 +227,16 @@ void nbx_ec_led_brightness_set(int id, int color,
 		}
 		nbx_ec_led_setting[id].update = 1;
 
-		wake_lock_timeout(&(nbx_ec_led_setting[id].wake_lock), 10 * HZ);
+		wake_lock(&(nbx_ec_led_setting[id].wake_lock));
 	}
 	spin_unlock_irqrestore(&(nbx_ec_led_setting[id].lock), flags);
 
-	queue_work(nbx_ec_led_workqueue, &nbx_ec_led_work);
+	if(nbx_ec_led_work_block == 0) {
+		if(nbx_ec_led_workqueue != NULL) {
+			cancel_delayed_work(&nbx_ec_led_work);
+			queue_delayed_work(nbx_ec_led_workqueue, &nbx_ec_led_work, 0);
+		}
+	}
 }
 
 int nbx_ec_led_blink_set(int id,
@@ -234,18 +251,48 @@ int nbx_ec_led_blink_set(int id,
 		nbx_ec_led_setting[id].off = *delay_off;
 		nbx_ec_led_setting[id].update = 1;
 
-		wake_lock_timeout(&(nbx_ec_led_setting[id].wake_lock), 10 * HZ);
+		wake_lock(&(nbx_ec_led_setting[id].wake_lock));
 	}
 	spin_unlock_irqrestore(&(nbx_ec_led_setting[id].lock), flags);
 
-	queue_work(nbx_ec_led_workqueue, &nbx_ec_led_work);
+	if(nbx_ec_led_work_block == 0) {
+		if(nbx_ec_led_workqueue != NULL) {
+			cancel_delayed_work(&nbx_ec_led_work);
+			queue_delayed_work(nbx_ec_led_workqueue, &nbx_ec_led_work, 0);
+		}
+	}
 
 	return 0;
 }
 
-static int nbx_ec_led_remove(struct platform_device *pdev);
+#ifdef CONFIG_SUSPEND
 
-static int nbx_ec_led_probe(struct platform_device *pdev)
+static int nbx_ec_led_suspend(struct nbx_ec_ipc_device *edev)
+{
+	nbx_ec_led_work_block = 1;
+	flush_delayed_work(&nbx_ec_led_work);
+
+	return 0;
+}
+static int nbx_ec_led_resume(struct nbx_ec_ipc_device *edev)
+{
+	/* restart when send not completed. */
+	nbx_ec_led_work_block = 0;
+	if(nbx_ec_led_workqueue != NULL) {
+		queue_delayed_work(nbx_ec_led_workqueue, &nbx_ec_led_work, 0);
+	}
+
+	return 0;
+}
+
+#else /* !CONFIG_SUSPEND */
+#define nbx_ec_led_suspend NULL
+#define nbx_ec_led_resume NULL
+#endif /* CONFIG_SUSPEND */
+
+static int nbx_ec_led_remove(struct nbx_ec_ipc_device *edev);
+
+static int nbx_ec_led_probe(struct nbx_ec_ipc_device *edev)
 {
 	int i;
 	int ret = 0;
@@ -273,22 +320,28 @@ static int nbx_ec_led_probe(struct platform_device *pdev)
 	nbx_ec_led_workqueue = create_singlethread_workqueue("nbx_ec_led_workqueue");
 	if(nbx_ec_led_workqueue == NULL) {
 		pr_err("nbx_ec_led:create_singlethread_workqueue() failed.\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto error_exit;
 	}
-	INIT_WORK(&nbx_ec_led_work, nbx_ec_led_set);
+	INIT_DELAYED_WORK(&nbx_ec_led_work, nbx_ec_led_set);
+	nbx_ec_led_work_block = 0;
 
 	for (i = 0; i < ARRAY_SIZE(nbx_ec_led_classdevs); i++) {
-		ret = led_classdev_register(&pdev->dev, &(nbx_ec_led_classdevs[i]));
+		ret = led_classdev_register(&edev->dev, &(nbx_ec_led_classdevs[i]));
 		if (ret < 0) {
-			nbx_ec_led_remove(pdev);
-			break;
+			goto error_exit;
 		}
 	}
+
+	return 0;
+
+error_exit:
+	nbx_ec_led_remove(edev);
 
 	return ret;
 }
 
-int nbx_ec_led_remove(struct platform_device *pdev)
+int nbx_ec_led_remove(struct nbx_ec_ipc_device *edev)
 {
 	int i;
 
@@ -300,44 +353,42 @@ int nbx_ec_led_remove(struct platform_device *pdev)
 		wake_lock_destroy(&(nbx_ec_led_setting[i].wake_lock));
 	}
 
-	flush_workqueue(nbx_ec_led_workqueue);
-	destroy_workqueue(nbx_ec_led_workqueue);
+	if(nbx_ec_led_workqueue != NULL) {
+		cancel_delayed_work_sync(&nbx_ec_led_work);
+		flush_workqueue(nbx_ec_led_workqueue);
+		destroy_workqueue(nbx_ec_led_workqueue);
+	}
 	nbx_ec_led_workqueue = NULL;
 
 	return 0;
 }
 
-static struct platform_driver nbx_ec_led_driver = {
-	.probe        = nbx_ec_led_probe,
-	.remove        = nbx_ec_led_remove,
-	.driver = {
-		.name    = "nbx-ec-led",
-		.owner    = THIS_MODULE,
+static struct nbx_ec_ipc_driver nbx_ec_led_driver = {
+	.probe   = nbx_ec_led_probe,
+	.remove  = nbx_ec_led_remove,
+	.suspend = nbx_ec_led_suspend,
+	.resume  = nbx_ec_led_resume,
+	.drv = {
+		.name    = "nbx_led",
 	},
 };
-
-static struct platform_device* nbx_ec_led_dev;
 
 static int __init nbx_ec_led_init(void)
 {
 	int ret;
 
-	ret = platform_driver_register(&nbx_ec_led_driver);
-	if (ret < 0)
+	ret = nbx_ec_ipc_driver_register(&nbx_ec_led_driver);
+	if (ret < 0) {
+		pr_err("%s:nbx_ec_ipc_driver_register() failed, %d\n", __func__, ret);
 		return ret;
-
-	nbx_ec_led_dev = platform_device_register_simple("nbx-ec-led", -1, NULL, 0);
-	if (IS_ERR(nbx_ec_led_dev)) {
-		ret = PTR_ERR(nbx_ec_led_dev);
-		platform_driver_unregister(&nbx_ec_led_driver);
 	}
-	return ret;
+
+	return 0;
 }
 
 static void __exit nbx_ec_led_exit(void)
 {
-	platform_device_unregister(nbx_ec_led_dev);
-	platform_driver_unregister(&nbx_ec_led_driver);
+	nbx_ec_ipc_driver_unregister(&nbx_ec_led_driver);
 }
 
 module_init(nbx_ec_led_init);

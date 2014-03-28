@@ -47,9 +47,9 @@
  * Station entries are added by mac80211 when you establish a link with a
  * peer. This means different things for the different type of interfaces
  * we support. For a regular station this mean we add the AP sta when we
- * receive an assocation response from the AP. For IBSS this occurs when
+ * receive an association response from the AP. For IBSS this occurs when
  * get to know about a peer on the same IBSS. For WDS we add the sta for
- * the peer imediately upon device open. When using AP mode we add stations
+ * the peer immediately upon device open. When using AP mode we add stations
  * for each respective station upon request from userspace through nl80211.
  *
  * In order to remove a STA info structure, various sta_info_destroy_*()
@@ -125,7 +125,7 @@ struct sta_info *sta_info_get_bss(struct ieee80211_sub_if_data *sdata,
 				    lockdep_is_held(&local->sta_mtx));
 	while (sta) {
 		if ((sta->sdata == sdata ||
-		     sta->sdata->bss == sdata->bss) &&
+		     (sta->sdata->bss && sta->sdata->bss == sdata->bss)) &&
 		    memcmp(sta->sta.addr, addr, ETH_ALEN) == 0)
 			break;
 		sta = rcu_dereference_check(sta->hnext,
@@ -174,8 +174,7 @@ static void __sta_info_free(struct ieee80211_local *local,
 	}
 
 #ifdef CONFIG_MAC80211_VERBOSE_DEBUG
-	printk(KERN_DEBUG "%s: Destroyed STA %pM\n",
-	       wiphy_name(local->hw.wiphy), sta->sta.addr);
+	wiphy_debug(local->hw.wiphy, "Destroyed STA %pM\n", sta->sta.addr);
 #endif /* CONFIG_MAC80211_VERBOSE_DEBUG */
 
 	kfree(sta);
@@ -200,8 +199,11 @@ static void sta_unblock(struct work_struct *wk)
 
 	if (!test_sta_flags(sta, WLAN_STA_PS_STA))
 		ieee80211_sta_ps_deliver_wakeup(sta);
-	else if (test_and_clear_sta_flags(sta, WLAN_STA_PSPOLL))
+	else if (test_and_clear_sta_flags(sta, WLAN_STA_PSPOLL)) {
+		clear_sta_flags(sta, WLAN_STA_PS_DRIVER);
 		ieee80211_sta_ps_deliver_poll_response(sta);
+	} else
+		clear_sta_flags(sta, WLAN_STA_PS_DRIVER);
 }
 
 static int sta_prepare_rate_control(struct ieee80211_local *local,
@@ -241,6 +243,9 @@ struct sta_info *sta_info_alloc(struct ieee80211_sub_if_data *sdata,
 	memcpy(sta->sta.addr, addr, ETH_ALEN);
 	sta->local = local;
 	sta->sdata = sdata;
+	sta->last_rx = jiffies;
+
+	ewma_init(&sta->avg_signal, 1024, 8);
 
 	if (sta_prepare_rate_control(local, sta, gfp)) {
 		kfree(sta);
@@ -262,8 +267,7 @@ struct sta_info *sta_info_alloc(struct ieee80211_sub_if_data *sdata,
 		sta->last_seq_ctrl[i] = cpu_to_le16(USHRT_MAX);
 
 #ifdef CONFIG_MAC80211_VERBOSE_DEBUG
-	printk(KERN_DEBUG "%s: Allocated STA %pM\n",
-	       wiphy_name(local->hw.wiphy), sta->sta.addr);
+	wiphy_debug(local->hw.wiphy, "Allocated STA %pM\n", sta->sta.addr);
 #endif /* CONFIG_MAC80211_VERBOSE_DEBUG */
 
 #ifdef CONFIG_MAC80211_MESH
@@ -282,7 +286,7 @@ static int sta_info_finish_insert(struct sta_info *sta, bool async)
 	unsigned long flags;
 	int err = 0;
 
-	WARN_ON(!mutex_is_locked(&local->sta_mtx));
+	lockdep_assert_held(&local->sta_mtx);
 
 	/* notify driver */
 	if (sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
@@ -300,8 +304,9 @@ static int sta_info_finish_insert(struct sta_info *sta, bool async)
 		sta->uploaded = true;
 #ifdef CONFIG_MAC80211_VERBOSE_DEBUG
 		if (async)
-			printk(KERN_DEBUG "%s: Finished adding IBSS STA %pM\n",
-			       wiphy_name(local->hw.wiphy), sta->sta.addr);
+			wiphy_debug(local->hw.wiphy,
+				    "Finished adding IBSS STA %pM\n",
+				    sta->sta.addr);
 #endif
 	}
 
@@ -411,8 +416,8 @@ int sta_info_insert_rcu(struct sta_info *sta) __acquires(RCU)
 		spin_unlock_irqrestore(&local->sta_lock, flags);
 
 #ifdef CONFIG_MAC80211_VERBOSE_DEBUG
-		printk(KERN_DEBUG "%s: Added IBSS STA %pM\n",
-		       wiphy_name(local->hw.wiphy), sta->sta.addr);
+		wiphy_debug(local->hw.wiphy, "Added IBSS STA %pM\n",
+			    sta->sta.addr);
 #endif /* CONFIG_MAC80211_VERBOSE_DEBUG */
 
 		ieee80211_queue_work(&local->hw, &local->sta_finish_work);
@@ -459,8 +464,7 @@ int sta_info_insert_rcu(struct sta_info *sta) __acquires(RCU)
 	}
 
 #ifdef CONFIG_MAC80211_VERBOSE_DEBUG
-	printk(KERN_DEBUG "%s: Inserted STA %pM\n",
-	       wiphy_name(local->hw.wiphy), sta->sta.addr);
+	wiphy_debug(local->hw.wiphy, "Inserted STA %pM\n", sta->sta.addr);
 #endif /* CONFIG_MAC80211_VERBOSE_DEBUG */
 
 	/* move reference to rcu-protected */
@@ -618,7 +622,7 @@ static int __must_check __sta_info_destroy(struct sta_info *sta)
 	struct ieee80211_sub_if_data *sdata;
 	struct sk_buff *skb;
 	unsigned long flags;
-	int ret;
+	int ret, i;
 
 	might_sleep();
 
@@ -635,7 +639,7 @@ static int __must_check __sta_info_destroy(struct sta_info *sta)
 	 * will be sufficient.
 	 */
 	set_sta_flags(sta, WLAN_STA_BLOCK_BA);
-	ieee80211_sta_tear_down_BA_sessions(sta);
+	ieee80211_sta_tear_down_BA_sessions(sta, true);
 
 	spin_lock_irqsave(&local->sta_lock, flags);
 	ret = sta_info_hash_del(local, sta);
@@ -646,10 +650,10 @@ static int __must_check __sta_info_destroy(struct sta_info *sta)
 	if (ret)
 		return ret;
 
-	if (sta->key) {
-		ieee80211_key_free(local, sta->key);
-		WARN_ON(sta->key);
-	}
+	for (i = 0; i < NUM_DEFAULT_KEYS; i++)
+		ieee80211_key_free(local, sta->gtk[i]);
+	if (sta->ptk)
+		ieee80211_key_free(local, sta->ptk);
 
 	sta->dead = true;
 
@@ -690,8 +694,7 @@ static int __must_check __sta_info_destroy(struct sta_info *sta)
 #endif
 
 #ifdef CONFIG_MAC80211_VERBOSE_DEBUG
-	printk(KERN_DEBUG "%s: Removed STA %pM\n",
-	       wiphy_name(local->hw.wiphy), sta->sta.addr);
+	wiphy_debug(local->hw.wiphy, "Removed STA %pM\n", sta->sta.addr);
 #endif /* CONFIG_MAC80211_VERBOSE_DEBUG */
 	cancel_work_sync(&sta->drv_unblock_wk);
 
@@ -841,13 +844,20 @@ void ieee80211_sta_expire(struct ieee80211_sub_if_data *sdata,
 	mutex_unlock(&local->sta_mtx);
 }
 
-struct ieee80211_sta *ieee80211_find_sta_by_hw(struct ieee80211_hw *hw,
-					       const u8 *addr)
+struct ieee80211_sta *ieee80211_find_sta_by_ifaddr(struct ieee80211_hw *hw,
+					       const u8 *addr,
+					       const u8 *localaddr)
 {
 	struct sta_info *sta, *nxt;
 
-	/* Just return a random station ... first in list ... */
+	/*
+	 * Just return a random station if localaddr is NULL
+	 * ... first in list.
+	 */
 	for_each_sta_info(hw_to_local(hw), addr, sta, nxt) {
+		if (localaddr &&
+		    compare_ether_addr(sta->sdata->vif.addr, localaddr) != 0)
+			continue;
 		if (!sta->uploaded)
 			return NULL;
 		return &sta->sta;
@@ -855,7 +865,7 @@ struct ieee80211_sta *ieee80211_find_sta_by_hw(struct ieee80211_hw *hw,
 
 	return NULL;
 }
-EXPORT_SYMBOL_GPL(ieee80211_find_sta_by_hw);
+EXPORT_SYMBOL_GPL(ieee80211_find_sta_by_ifaddr);
 
 struct ieee80211_sta *ieee80211_find_sta(struct ieee80211_vif *vif,
 					 const u8 *addr)
@@ -876,6 +886,13 @@ struct ieee80211_sta *ieee80211_find_sta(struct ieee80211_vif *vif,
 }
 EXPORT_SYMBOL(ieee80211_find_sta);
 
+static void clear_sta_ps_flags(void *_sta)
+{
+	struct sta_info *sta = _sta;
+
+	clear_sta_flags(sta, WLAN_STA_PS_DRIVER | WLAN_STA_PS_STA);
+}
+
 /* powersave support code */
 void ieee80211_sta_ps_deliver_wakeup(struct sta_info *sta)
 {
@@ -883,14 +900,16 @@ void ieee80211_sta_ps_deliver_wakeup(struct sta_info *sta)
 	struct ieee80211_local *local = sdata->local;
 	int sent, buffered;
 
-	drv_sta_notify(local, sdata, STA_NOTIFY_AWAKE, &sta->sta);
+	if (!(local->hw.flags & IEEE80211_HW_AP_LINK_PS))
+		drv_sta_notify(local, sdata, STA_NOTIFY_AWAKE, &sta->sta);
 
 	if (!skb_queue_empty(&sta->ps_tx_buf))
 		sta_info_clear_tim_bit(sta);
 
 	/* Send all buffered frames to the station */
 	sent = ieee80211_add_pending_skbs(local, &sta->tx_filtered);
-	buffered = ieee80211_add_pending_skbs(local, &sta->ps_tx_buf);
+	buffered = ieee80211_add_pending_skbs_fn(local, &sta->ps_tx_buf,
+						 clear_sta_ps_flags, sta);
 	sent += buffered;
 	local->total_ps_buffered -= buffered;
 
@@ -969,7 +988,7 @@ void ieee80211_sta_block_awake(struct ieee80211_hw *hw,
 
 	if (block)
 		set_sta_flags(sta, WLAN_STA_PS_DRIVER);
-	else
+	else if (test_sta_flags(sta, WLAN_STA_PS_DRIVER))
 		ieee80211_queue_work(hw, &sta->drv_unblock_wk);
 }
 EXPORT_SYMBOL(ieee80211_sta_block_awake);

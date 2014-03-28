@@ -1,7 +1,16 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
- * Copyright (c) 2010 Sony Corporation.
- * All rights reserved.
+ * Copyright (C) 2011 Sony Corporation
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License, version 2, as
+ * published by the Free Software Foundation.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/module.h>
@@ -11,7 +20,6 @@
 #include <linux/firmware.h>
 #include <linux/clk.h>
 #include <linux/err.h>
-#include <linux/earlysuspend.h>
 
 #include <asm/gpio.h>
 #include <asm/uaccess.h>
@@ -24,35 +32,44 @@
 #define ERROR(format, args...) \
 	printk(KERN_ERR "ERR[%s:%d]" format, __FILE__, __LINE__ , ##args)
 
-#if 1
+#if 0
 #define DPRINTF(format, args...) \
 	printk("["DEV_NAME"]" format, ##args)
 #else
 #define DPRINTF(format, args...) do {} while(0)
 #endif
 
-/* parameters for FW version B5767 for NBX0300 */
+/* parameters for FW version B7211 for NBX0300 */
 const uint8_t ptApiCmd_nbx0300[] = {
 	0x80, 0x1C, 0x00, 0x01,
 	0x80, 0x17, 0x00, 0x02,
 	0x80, 0x18, 0x00, 0x02,
+	0x80, 0x17, 0x00, 0x00,
+	0x80, 0x18, 0x00, 0x05,
 	0x80, 0x17, 0x00, 0x03,
 	0x80, 0x18, 0x00, 0x01,
 	0x80, 0x17, 0x00, 0x34,
-	0x80, 0x18, 0x00, 0x0A,
+	0x80, 0x18, 0x00, 0x07,
 	0x80, 0x17, 0x00, 0x12,
 	0x80, 0x18, 0xFF, 0xFB,
 	0x80, 0x17, 0x00, 0x04,
+	0x80, 0x18, 0x00, 0x01,
+	0x80, 0x17, 0x00, 0x06,
+	0x80, 0x18, 0xFF, 0xCC,
+	0x80, 0x17, 0x01, 0x00,
+	0x80, 0x18, 0x00, 0x05,
+	0x80, 0x17, 0x00, 0x1A,
 	0x80, 0x18, 0x00, 0x00,
 	0x80, 0x32, 0x00, 0x98,
-	0x80, 0x17, 0x00, 0x20,
-	0x80, 0x18, 0x00, 0x02,
 	0x80, 0x17, 0x00, 0x36,
 	0x80, 0x18, 0x00, 0x01,
+	0x80, 0x1B, 0x00, 0x16,
 	0x80, 0x0C, 0x03, 0x00,
 	0x80, 0x0D, 0x00, 0x01,
-	0x80, 0x1B, 0x00, 0x11,
+	0x80, 0x15, 0x00, 0x00,
 	0x80, 0x26, 0x00, 0x14,
+	0x80, 0x17, 0x00, 0x20,
+	0x80, 0x18, 0x00, 0x00,
 };
 
 const uint8_t ptApiAck_nbx0300[] = {
@@ -67,25 +84,100 @@ const uint8_t ptApiAck_nbx0300[] = {
 	0x80, 0x18,
 	0x80, 0x17,
 	0x80, 0x18,
+	0x80, 0x17,
+	0x80, 0x18,
+	0x80, 0x17,
+	0x80, 0x18,
+	0x80, 0x17,
+	0x80, 0x18,
+	0x80, 0x17,
+	0x80, 0x18,
 	0x80, 0x32,
 	0x80, 0x17,
 	0x80, 0x18,
+	0x80, 0x1B,
+	0x80, 0x0C,
+	0x80, 0x0D,
+	0x80, 0x15,
+	0x80, 0x26,
 	0x80, 0x17,
 	0x80, 0x18,
+};
+
+const uint8_t ptApiCmd_nbx0300_thru[] = {
+	0x80, 0x1C, 0x00, 0x00,
+	0x80, 0x17, 0x00, 0x02,
+	0x80, 0x18, 0x00, 0x02,
+	0x80, 0x17, 0x00, 0x00,
+	0x80, 0x18, 0x00, 0x05,
+	0x80, 0x17, 0x00, 0x03,
+	0x80, 0x18, 0x00, 0x01,
+	0x80, 0x17, 0x00, 0x34,
+	0x80, 0x18, 0x00, 0x07,
+	0x80, 0x17, 0x00, 0x12,
+	0x80, 0x18, 0xFF, 0xFB,
+	0x80, 0x17, 0x00, 0x04,
+	0x80, 0x18, 0x00, 0x01,
+	0x80, 0x17, 0x00, 0x06,
+	0x80, 0x18, 0xFF, 0xCC,
+	0x80, 0x17, 0x01, 0x00,
+	0x80, 0x18, 0x00, 0x05,
+	0x80, 0x17, 0x00, 0x1A,
+	0x80, 0x18, 0x00, 0x00,
+	0x80, 0x32, 0x00, 0x98,
+	0x80, 0x17, 0x00, 0x36,
+	0x80, 0x18, 0x00, 0x01,
+	0x80, 0x1B, 0x00, 0x16,
+	0x80, 0x0C, 0x03, 0x00,
+	0x80, 0x0D, 0x00, 0x01,
+	0x80, 0x15, 0x00, 0x00,
+	0x80, 0x26, 0x00, 0x14,
+	0x80, 0x17, 0x00, 0x20,
+	0x80, 0x18, 0x00, 0x00,
+};
+
+/* parameters for FW version B7109 for NBX0200 */
+/* start with pass through setting until tuned parameter is ready */
+const uint8_t ptApiCmd_nbx0200[] = {
+	0x80, 0x1C, 0x00, 0x00,
+	0x80, 0x0C, 0x03, 0x00,
+	0x80, 0x0D, 0x00, 0x01,
+	0x80, 0x1B, 0x00, 0x11,
+	0x80, 0x26, 0x00, 0x14,
+};
+
+const uint8_t ptApiAck_nbx0200[] = {
+	0x80, 0x1C,
 	0x80, 0x0C,
 	0x80, 0x0D,
 	0x80, 0x1B,
 	0x80, 0x26,
 };
 
-/* parameters for FW version B5987 for NBX0200 */
-/* start with pass through setting until tuned parameter is ready */
-const uint8_t ptApiCmd_nbx0200[] = {
+const uint8_t ptApiCmd_nbx0200_thru[] = {
 	0x80, 0x1C, 0x00, 0x00,
+	0x80, 0x0C, 0x03, 0x00,
+	0x80, 0x0D, 0x00, 0x01,
+	0x80, 0x1B, 0x00, 0x11,
+	0x80, 0x26, 0x00, 0x14,
 };
 
-const uint8_t ptApiAck_nbx0200[] = {
+/* parameters for FW version B7265 for PASS THROUGH */
+/* start with pass through setting until tuned parameter is ready */
+const uint8_t ptApiCmd_passthrough[] = {
+	0x80, 0x1C, 0x00, 0x00,
+	0x80, 0x0C, 0x03, 0x00,
+	0x80, 0x0D, 0x00, 0x01,
+	0x80, 0x1B, 0x00, 0x11,
+	0x80, 0x26, 0x00, 0x14,
+};
+
+const uint8_t ptApiAck_passthrough[] = {
 	0x80, 0x1C,
+	0x80, 0x0C,
+	0x80, 0x0D,
+	0x80, 0x1B,
+	0x80, 0x26,
 };
 
 static struct i2c_device_id a1026_id[] = {
@@ -238,10 +330,10 @@ check_version(struct i2c_client *cl)
 		*buff_temp = ptVersion_resp1[3];
 		buff_temp++;
 	}
-	if (strstr(ptVersion, "NBX0200")) {
-		ret = VERSION_NBX0200;
-	} else if (strstr(ptVersion, "B4099")) {
+	if (strstr(ptVersion, "B7265")) {
 		ret = VERSION_PASSTHROUGH;
+	} else if (strstr(ptVersion, "NBX0200")) {
+		ret = VERSION_NBX0200;
 	} else if (strstr(ptVersion, "NBX0300")) {
 		ret = VERSION_NBX0300;
 	} else {
@@ -254,13 +346,9 @@ check_version(struct i2c_client *cl)
 }
 
 static int
-load_parameters(struct i2c_client *cl)
+load_parameters(struct i2c_client *cl, int mode)
 {
 	int ret;
-	int i, j;
-	int cmd_size = 4;
-	int ack_size = 2;
-	uint8_t buf[ack_size];
 	struct a1026_platform_data *sdat;
 
 	sdat = cl->dev.platform_data;
@@ -271,46 +359,38 @@ load_parameters(struct i2c_client *cl)
 	switch (sdat->fw_version) {
 	case VERSION_PASSTHROUGH:
 		DPRINTF("VERSION: PATH THROUGH\n");
-		path_through_command(cl);
+		if (( ret = i2c_master_send(cl, ptApiCmd_passthrough, sizeof(ptApiCmd_passthrough))) < 0) {
+			ERROR("ptApiCmd_passthrough fail.  (ret = %d)\n", ret);
+			return ret;
+		}
+
                 break;
 	case VERSION_NBX0200:
 		DPRINTF("VERSION: NBX0200\n");
-		for (i = 0, j = 0; i < sizeof(ptApiCmd_nbx0200); i += cmd_size, j += ack_size) {
-			if (( ret = i2c_master_send(cl, ptApiCmd_nbx0200 + i, cmd_size)) < 0) {
-				ERROR("ptApiCmd_nbx0200 fail.  (ret = %d)\n", ret);
-				return -1;
-			}
-			msleep(20);
-			if (( ret = i2c_master_recv(cl, buf, ack_size)) < 0) {
-				ERROR("ptApiCmd_nbx0200 fail.  (ret = %d)\n", ret);
-				return -1;
-			}
-			if (memcmp(buf, ptApiAck_nbx0200 + j, ack_size)) {
-				ERROR("invallid ack %02x:%02x\n", buf[0], buf[1]);
-				printk("ack count: %d\n", j);
-				return -1;
-			}
+		if ( mode == A1026_VOICE_PROCESSING_ON ) {
+			ret = i2c_master_send(cl, ptApiCmd_nbx0200, sizeof(ptApiCmd_nbx0200));
+		} else {
+			ret = i2c_master_send(cl, ptApiCmd_nbx0200_thru, sizeof(ptApiCmd_nbx0200_thru));
 		}
+		if ( ret < 0) {
+			ERROR("ptApiCmd_nbx0200 fail.  (mode = %d, ret = %d)\n", mode, ret);
+			return ret;
+		}
+
                 break;
 	case VERSION_NBX0300:
 		DPRINTF("VERSION: NBX0300\n");
-		for (i = 0, j = 0; i < sizeof(ptApiCmd_nbx0300); i += cmd_size, j += ack_size) {
-			if (( ret = i2c_master_send(cl, ptApiCmd_nbx0300 + i, cmd_size)) < 0) {
-				ERROR("ptApiCmd_nbx0300 fail.  (ret = %d)\n", ret);
-				return -1;
-			}
-			msleep(20);
-			if (( ret = i2c_master_recv(cl, buf, ack_size)) < 0) {
-				ERROR("ptApiCmd_nbx0300 fail.  (ret = %d)\n", ret);
-				return -1;
-			}
-			if (memcmp(buf, ptApiAck_nbx0300 + j, ack_size)) {
-				ERROR("invallid ack %02x:%02x\n", buf[0], buf[1]);
-				printk("ack count: %d\n", j);
-				return -1;
-			}
+		if ( mode == A1026_VOICE_PROCESSING_ON ) {
+			ret = i2c_master_send(cl, ptApiCmd_nbx0300, sizeof(ptApiCmd_nbx0300));
+		} else {
+			ret = i2c_master_send(cl, ptApiCmd_nbx0300_thru, sizeof(ptApiCmd_nbx0300_thru));
 		}
-                break;
+		if ( ret < 0) {
+			ERROR("ptApiCmd_nbx0300 fail.  (mode = %d, ret = %d)\n", mode, ret);
+			return ret;
+		}
+
+		break;
 	default:
 		ERROR("VERSION unknown\n");
                 break;
@@ -378,8 +458,12 @@ load_firmware(const struct firmware *firm, void *arg)
 
 	release_firmware(firm);
 
-	load_parameters(cl);
-	sdat->is_awake = 1;
+	load_parameters(cl, A1026_VOICE_PROCESSING_ON);
+
+	sleep_command(a1026_i2c);
+	msleep(120);
+	clk_disable(sdat->clock);
+	sdat->is_awake = 0;
 
 	return;
 }
@@ -389,6 +473,7 @@ a1026_probe(struct i2c_client *cl, const struct i2c_device_id *id)
 {
 	struct a1026_platform_data *sdat;
 	int ret = -1;	
+	struct clk* clock;
 
 	a1026_i2c = cl;
 	sdat = cl->dev.platform_data;
@@ -418,15 +503,17 @@ a1026_probe(struct i2c_client *cl, const struct i2c_device_id *id)
 	}
 
 	/* initialize CLK26M_OUT */
-	if ((sdat->clock = clk_get(&cl->dev, sdat->clk)) == NULL) {
+	clock = clk_get(/*&cl->dev*/NULL, sdat->clk);
+	if (IS_ERR_OR_NULL(clock)) {
 		ERROR("clk_get %s\n", sdat->clk);
+		ret = (clock) ? PTR_ERR(clock) : -ENOENT;
 		goto err2;
 	}
+	sdat->clock = clock;
 	if ((ret = clk_enable(sdat->clock))) {
 		ERROR("clk_enable\n");
 		goto err3;
 	}
-
 	/* request firmware to init */
 	if ((ret = request_firmware_nowait(THIS_MODULE, 1, DEV_NAME".bin", 
 	    &cl->dev, GFP_KERNEL, sdat, load_firmware))) {
@@ -454,6 +541,7 @@ a1026_remove(struct i2c_client *cl)
 	sdat = cl->dev.platform_data;
 
 	clk_disable(sdat->clock);
+	sdat->is_awake = 0;
 	clk_put(sdat->clock);
 	gpio_free(sdat->wake_pin);
 	gpio_free(sdat->reset_pin);
@@ -479,46 +567,41 @@ a1026_suspend_command(void)
 EXPORT_SYMBOL_GPL(a1026_suspend_command);
 
 static int
-a1026_suspend(struct i2c_client *cl, pm_message_t mesg)
+a1026_suspend(struct device* dev)
 {
-	struct a1026_platform_data *sdat;
-	sdat = cl->dev.platform_data;
-
-	sleep_command(cl);
-	msleep(120);
-	clk_disable(sdat->clock);
-
+        a1026_suspend_command();
         return 0;
 }
 
 static int
-a1026_resume(struct i2c_client *cl)
+a1026_resume(struct device* dev)
 {
-	struct a1026_platform_data *sdat;
-	sdat = cl->dev.platform_data;
-
-	clk_enable(sdat->clock);
-	gpio_set_value(sdat->wake_pin, 0);
-	msleep(30);
-	sync_command(cl);
-	gpio_set_value(sdat->wake_pin, 1);
-	load_parameters(cl);
-
         return 0;
 }
 
+static struct dev_pm_ops a1026_pm_ops = {
+	.suspend = a1026_suspend,
+	.resume = a1026_resume,
+};
+
+
 int
-a1026_resume_command(void)
+a1026_resume_command(int mode)
 {
 	struct a1026_platform_data *sdat;
 	sdat = a1026_i2c->dev.platform_data;
 
 	if (!sdat->is_awake) {
-		a1026_resume(a1026_i2c);
+		clk_enable(sdat->clock);
+		gpio_set_value(sdat->wake_pin, 0);
+		msleep(30);
+		sync_command(a1026_i2c);
+		gpio_set_value(sdat->wake_pin, 1);
+		load_parameters(a1026_i2c, mode);
 		sdat->is_awake = 1;
 	}
 
-        return 0;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(a1026_resume_command);
 
@@ -526,32 +609,16 @@ static struct i2c_driver a1026_i2c_driver = {
 	.driver = {
 		.name = DEV_NAME,
 		.owner = THIS_MODULE,
+		.pm = &a1026_pm_ops,
 	},
 	.probe = a1026_probe,
 	.remove = a1026_remove,
-	/*.suspend = a1026_suspend,*/
-	/*.resume = a1026_resume,*/
 	.id_table = a1026_id,
 };
-
-struct early_suspend a1026_early_suspender;
-static void a1026_early_suspend(struct early_suspend *h)
-{
-	a1026_suspend_command();
-}
-static void a1026_late_resume(struct early_suspend *h)
-{
-	a1026_resume_command();
-}
 
 static int
 a1026_i2c_init(void)
 {
-	a1026_early_suspender.suspend = a1026_early_suspend;
-	a1026_early_suspender.resume = a1026_late_resume;
-	a1026_early_suspender.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN;
-	register_early_suspend(&a1026_early_suspender);
-
 	return i2c_add_driver(&a1026_i2c_driver);
 }
 

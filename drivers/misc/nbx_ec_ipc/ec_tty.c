@@ -1,6 +1,5 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.
@@ -12,7 +11,6 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
-/* EC TTY */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -30,7 +28,7 @@
 #define EC_IPC_PAYLOAD_LIMIT 128
 
 static struct tty_struct* ec_tty;
-static DECLARE_MUTEX(ec_tty_mutex);
+static DEFINE_SEMAPHORE(ec_tty_mutex);
 static int open_count;
 
 static void ec_tty_receive_func(const uint8_t* buf, int size);
@@ -104,14 +102,14 @@ static void ec_tty_receive_func(const uint8_t* buf, int size)
 	int i;
 
 	down(&ec_tty_mutex);
-	{
-		if((ec_tty == NULL) || (buf == NULL) || (size <= 0)) return;
+	do {
+		if((ec_tty == NULL) || (buf == NULL) || (size <= 0)) break;
 
 		for(i = 0; i < size; i++) {
 			tty_insert_flip_char(ec_tty, buf[i], TTY_NORMAL);
 		}
 		tty_flip_buffer_push(ec_tty);
-	}
+	} while(0);
 	up(&ec_tty_mutex);
 }
 

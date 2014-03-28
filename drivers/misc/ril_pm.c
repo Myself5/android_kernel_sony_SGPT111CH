@@ -27,7 +27,25 @@
 #include <linux/suspend.h>
 #include <linux/percpu.h>
 
+#define DRIVER_NAME "ril_pm"
+#undef VERBOSE_DEBUG
+
+#define dbg(STR, ARGS...)                                  \
+        do {                                               \
+	    printk("%s: " STR "\n" , DRIVER_NAME, ##ARGS); \
+	} while (0)                                        
+
+#ifdef VERBOSE_DEBUG
+#define vdbg(STR, ARGS...)                                            \
+        do {                                                          \
+	    printk(KERN_DEBUG "%s: " STR "\n" , DRIVER_NAME, ##ARGS); \
+	} while (0)                                                   
+#else
+#define vdbg(STR, ARGS...) {}
+#endif
+
 pid_t s_ril_pid = 0;
+
 
 #if defined(CONFIG_PM)
 //
@@ -61,20 +79,22 @@ ril_pm_notifier_show(struct kobject *kobj, struct kobj_attribute *attr,
     // Block if the value is not available yet.
     if (! sys_ril_notifier)
     {
-        printk(KERN_INFO "%s: blocking\n", __func__);
-        wait_event_interruptible(ril_pm_notifier_wait, sys_ril_notifier);
+        vdbg("blocking");
+        if( wait_event_interruptible(ril_pm_notifier_wait, sys_ril_notifier )){
+           return -ERESTARTSYS;
+        }
     }
 
     // In case of false wakeup, return "".
     if (! sys_ril_notifier)
     {
-        printk(KERN_INFO "%s: false wakeup, returning with '\\n'\n", __func__);
+        dbg("false wakeup, returning with '\\n'");
         nchar = sprintf(buf, "\n");
         return nchar;
     }
 
     // Return the value, and clear.
-    printk(KERN_INFO "%s: returning with '%s'\n", __func__, sys_ril_notifier);
+    dbg("returning with '%s'", sys_ril_notifier);
     nchar = sprintf(buf, "%s\n", sys_ril_notifier);
     sys_ril_notifier = NULL;
     return nchar;
@@ -87,17 +107,17 @@ ril_pm_notifier_store(struct kobject *kobj, struct kobj_attribute *attr,
 {
     if (!strncmp(buf, STRING_PM_CONTINUE, strlen(STRING_PM_CONTINUE))) {
         // Wake up pm_notifier.
-        printk(KERN_INFO "%s: PM_CONTINUE\n", __func__);
+        dbg("PM_CONTINUE");
         ril_pm_continue_ok = 1;
         wake_up(&ril_ack_wait);
     }
     else if (!strncmp(buf, STRING_PM_SIGNAL, strlen(STRING_PM_SIGNAL))) {
         s_ril_pid = 0;
         sscanf(buf, "%*s %d", &s_ril_pid);
-        printk(KERN_INFO "%s: RIL pid=%d\n", __func__, s_ril_pid);
+        dbg("RIL pid=%d", s_ril_pid);
     }
     else {
-        printk(KERN_ERR "%s: wrong value '%s'\n", __func__, buf);
+        dbg("wrong value '%s'", buf);
     }
 
     return count;
@@ -118,7 +138,7 @@ static void notify_ril(const char* notice)
 
     // In case daemon's pid is not reported, do not signal or wait.
     if (!s_ril_pid) {
-        printk(KERN_ERR "%s: don't know RIL pid\n", __func__);
+        dbg("don't know RIL pid");
         return;
     }
 
@@ -129,10 +149,10 @@ static void notify_ril(const char* notice)
     wake_up(&ril_pm_notifier_wait);
 
     // Wait for the reply from GPS HAL.
-    printk(KERN_INFO "%s: wait for RIL\n", __func__);
+    vdbg("wait for RIL");
     if (wait_event_timeout(ril_ack_wait,
                    ril_pm_continue_ok, timeout) == 0) {
-        printk(KERN_ERR "%s: timed out. RIL did not reply\n", __func__);
+        dbg("timed out. RIL did not reply");
     }
 
     // Go back to the initial state.
@@ -142,8 +162,7 @@ static void notify_ril(const char* notice)
 int ril_pm_notifier(struct notifier_block *nb,
                       unsigned long event, void *nouse)
 {
-    printk(KERN_INFO "%s: start processing event=%lx\n", __func__, event);
-
+    vdbg("start processing event=%lx", event);
     // Notify the event to RIL.
     switch (event) {
     case PM_SUSPEND_PREPARE:
@@ -153,11 +172,11 @@ int ril_pm_notifier(struct notifier_block *nb,
         notify_ril(STRING_PM_POST_SUSPEND);
         break;
     default:
-        printk(KERN_ERR "%s: unknown event %ld\n", __func__, event);
+        dbg("unknown event %ld", event);
         return NOTIFY_DONE;
     }
 
-    printk(KERN_INFO "%s: finished processing event=%ld\n", __func__, event);
+    vdbg("finished processing event=%ld", event);
     return NOTIFY_OK;
 }
 #endif
@@ -166,14 +185,14 @@ int ril_pm_notifier(struct notifier_block *nb,
 static int __init ril_pm_init(void)
 {
     int ret = 0;
-    printk(KERN_INFO "%s called\n", __func__);
+    dbg("init");
 
     #if defined(CONFIG_PM)
     // Create /sys/power/ril/notifier.
     ril_kobj = kobject_create_and_add("ril", power_kobj);
     ret = sysfs_create_file(ril_kobj, &ril_pm_notifier_attribute.attr);
     if(ret) {
-        printk(KERN_ERR "%s: entry with the given name already exists\n", __func__);
+        dbg("entry with the given name already exists");
         return ret;
     }
 
@@ -192,7 +211,7 @@ static int __init ril_pm_init(void)
 
 static void __exit ril_pm_deinit(void)
 {
-    printk(KERN_INFO "%s called\n", __func__);
+    dbg("deinit");
 }
 
 module_init(ril_pm_init);

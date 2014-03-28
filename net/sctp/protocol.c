@@ -46,6 +46,8 @@
  * be incorporated into the next SCTP release.
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/netdevice.h>
@@ -90,7 +92,7 @@ static struct sctp_af *sctp_af_v6_specific;
 struct kmem_cache *sctp_chunk_cachep __read_mostly;
 struct kmem_cache *sctp_bucket_cachep __read_mostly;
 
-int sysctl_sctp_mem[3];
+long sysctl_sctp_mem[3];
 int sysctl_sctp_rmem[3];
 int sysctl_sctp_wmem[3];
 
@@ -466,32 +468,32 @@ static struct dst_entry *sctp_v4_get_dst(struct sctp_association *asoc,
 					 union sctp_addr *saddr)
 {
 	struct rtable *rt;
-	struct flowi fl;
+	struct flowi4 fl4;
 	struct sctp_bind_addr *bp;
 	struct sctp_sockaddr_entry *laddr;
 	struct dst_entry *dst = NULL;
 	union sctp_addr dst_saddr;
 
-	memset(&fl, 0x0, sizeof(struct flowi));
-	fl.fl4_dst  = daddr->v4.sin_addr.s_addr;
-	fl.fl_ip_dport = daddr->v4.sin_port;
-	fl.proto = IPPROTO_SCTP;
+	memset(&fl4, 0x0, sizeof(struct flowi4));
+	fl4.daddr  = daddr->v4.sin_addr.s_addr;
+	fl4.fl4_dport = daddr->v4.sin_port;
+	fl4.flowi4_proto = IPPROTO_SCTP;
 	if (asoc) {
-		fl.fl4_tos = RT_CONN_FLAGS(asoc->base.sk);
-		fl.oif = asoc->base.sk->sk_bound_dev_if;
-		fl.fl_ip_sport = htons(asoc->base.bind_addr.port);
+		fl4.flowi4_tos = RT_CONN_FLAGS(asoc->base.sk);
+		fl4.flowi4_oif = asoc->base.sk->sk_bound_dev_if;
+		fl4.fl4_sport = htons(asoc->base.bind_addr.port);
 	}
 	if (saddr) {
-		fl.fl4_src = saddr->v4.sin_addr.s_addr;
-		fl.fl_ip_sport = saddr->v4.sin_port;
+		fl4.saddr = saddr->v4.sin_addr.s_addr;
+		fl4.fl4_sport = saddr->v4.sin_port;
 	}
 
 	SCTP_DEBUG_PRINTK("%s: DST:%pI4, SRC:%pI4 - ",
-			  __func__, &fl.fl4_dst, &fl.fl4_src);
+			  __func__, &fl4.daddr, &fl4.saddr);
 
-	if (!ip_route_output_key(&init_net, &rt, &fl)) {
+	rt = ip_route_output_key(&init_net, &fl4);
+	if (!IS_ERR(rt))
 		dst = &rt->dst;
-	}
 
 	/* If there is no association or if a source address is passed, no
 	 * more validation is required.
@@ -531,9 +533,10 @@ static struct dst_entry *sctp_v4_get_dst(struct sctp_association *asoc,
 			continue;
 		if ((laddr->state == SCTP_ADDR_SRC) &&
 		    (AF_INET == laddr->a.sa.sa_family)) {
-			fl.fl4_src = laddr->a.v4.sin_addr.s_addr;
-			fl.fl_ip_sport = laddr->a.v4.sin_port;
-			if (!ip_route_output_key(&init_net, &rt, &fl)) {
+			fl4.saddr = laddr->a.v4.sin_addr.s_addr;
+			fl4.fl4_sport = laddr->a.v4.sin_port;
+			rt = ip_route_output_key(&init_net, &fl4);
+			if (!IS_ERR(rt)) {
 				dst = &rt->dst;
 				goto out_unlock;
 			}
@@ -707,8 +710,7 @@ static int sctp_ctl_sock_init(void)
 					   &init_net);
 
 	if (err < 0) {
-		printk(KERN_ERR
-		       "SCTP: Failed to create the SCTP control socket.\n");
+		pr_err("Failed to create the SCTP control socket\n");
 		return err;
 	}
 	return 0;
@@ -798,7 +800,7 @@ static void sctp_inet_skb_msgname(struct sk_buff *skb, char *msgname, int *len)
 static int sctp_inet_af_supported(sa_family_t family, struct sctp_sock *sp)
 {
 	/* PF_INET only supports AF_INET addresses. */
-	return (AF_INET == family);
+	return AF_INET == family;
 }
 
 /* Address matching with wildcards allowed. */
@@ -1203,10 +1205,10 @@ SCTP_STATIC __init int sctp_init(void)
 		if ((sctp_assoc_hashsize > (64 * 1024)) && order > 0)
 			continue;
 		sctp_assoc_hashtable = (struct sctp_hashbucket *)
-					__get_free_pages(GFP_ATOMIC, order);
+			__get_free_pages(GFP_ATOMIC|__GFP_NOWARN, order);
 	} while (!sctp_assoc_hashtable && --order > 0);
 	if (!sctp_assoc_hashtable) {
-		printk(KERN_ERR "SCTP: Failed association hash alloc.\n");
+		pr_err("Failed association hash alloc\n");
 		status = -ENOMEM;
 		goto err_ahash_alloc;
 	}
@@ -1220,7 +1222,7 @@ SCTP_STATIC __init int sctp_init(void)
 	sctp_ep_hashtable = (struct sctp_hashbucket *)
 		kmalloc(64 * sizeof(struct sctp_hashbucket), GFP_KERNEL);
 	if (!sctp_ep_hashtable) {
-		printk(KERN_ERR "SCTP: Failed endpoint_hash alloc.\n");
+		pr_err("Failed endpoint_hash alloc\n");
 		status = -ENOMEM;
 		goto err_ehash_alloc;
 	}
@@ -1236,10 +1238,10 @@ SCTP_STATIC __init int sctp_init(void)
 		if ((sctp_port_hashsize > (64 * 1024)) && order > 0)
 			continue;
 		sctp_port_hashtable = (struct sctp_bind_hashbucket *)
-					__get_free_pages(GFP_ATOMIC, order);
+			__get_free_pages(GFP_ATOMIC|__GFP_NOWARN, order);
 	} while (!sctp_port_hashtable && --order > 0);
 	if (!sctp_port_hashtable) {
-		printk(KERN_ERR "SCTP: Failed bind hash alloc.");
+		pr_err("Failed bind hash alloc\n");
 		status = -ENOMEM;
 		goto err_bhash_alloc;
 	}
@@ -1248,8 +1250,7 @@ SCTP_STATIC __init int sctp_init(void)
 		INIT_HLIST_HEAD(&sctp_port_hashtable[i].chain);
 	}
 
-	printk(KERN_INFO "SCTP: Hash tables configured "
-			 "(established %d bind %d)\n",
+	pr_info("Hash tables configured (established %d bind %d)\n",
 		sctp_assoc_hashsize, sctp_port_hashsize);
 
 	/* Disable ADDIP by default. */
@@ -1290,8 +1291,7 @@ SCTP_STATIC __init int sctp_init(void)
 
 	/* Initialize the control inode/socket for handling OOTB packets.  */
 	if ((status = sctp_ctl_sock_init())) {
-		printk (KERN_ERR
-			"SCTP: Failed to initialize the SCTP control sock.\n");
+		pr_err("Failed to initialize the SCTP control sock\n");
 		goto err_ctl_sock_init;
 	}
 

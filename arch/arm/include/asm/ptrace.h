@@ -29,6 +29,8 @@
 #define PTRACE_SETCRUNCHREGS	26
 #define PTRACE_GETVFPREGS	27
 #define PTRACE_SETVFPREGS	28
+#define PTRACE_GETHBPREGS	29
+#define PTRACE_SETHBPREGS	30
 
 /*
  * PSR bits
@@ -127,8 +129,6 @@ struct pt_regs {
 #define ARM_ORIG_r0	uregs[17]
 
 #ifdef __KERNEL__
-
-#define arch_has_single_step()	(1)
 
 #define user_mode(regs)	\
 	(((regs)->ARM_cpsr & 0xf) == 0)

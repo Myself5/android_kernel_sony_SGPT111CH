@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * cmv59dx.c - cmv59dx camera driver
  *
@@ -78,7 +78,15 @@ struct cmv59dx_info {
 #define CMV59DX_MCU_ADDR      0x98C
 #define CMV59DX_MCU_DATA      0x990
 
+#define CMV59DX_VIDEO_CHAT_OFF          0
+#define CMV59DX_VIDEO_CHAT_ON           1
+/*
+ * is_cmv59dx_video_chat =CMV59DX_VIDEO_CHAT_OFF, Camera device should not appy customized settings for video chat.
+ * is_cmv59dx_video_chat =CMV59DX_VIDEO_CHAT_ON, Camera device should appy customized settings for video chat.
+ */
+bool is_cmv59dx_video_chat = CMV59DX_VIDEO_CHAT_OFF;
 
+//modify AE_STATUS_READY timeout from 100s to 1s.
 static struct cmv59dx_reg InitSequence[] =
 {
 //1.Initialize camera
@@ -416,7 +424,7 @@ static struct cmv59dx_reg InitSequence[] =
     {CMV59DX_POLL_FIELD,AE_STATUS_READY},
     {POLL_FIELD_VALUE,1},
     {POLL_FIELD_DELAY,100},
-    {POLL_FIELD_TIMEOUT,1000},
+    {POLL_FIELD_TIMEOUT,10},
 
     {CMV59DX_MCU_ADDR,0xA207},
     {CMV59DX_MCU_DATA,0x000C},
@@ -507,7 +515,7 @@ static struct cmv59dx_reg InitSequence[] =
     {CMV59DX_POLL_FIELD,AE_STATUS_READY},
     {POLL_FIELD_VALUE,1},
     {POLL_FIELD_DELAY,100},
-    {POLL_FIELD_TIMEOUT,1000},
+    {POLL_FIELD_TIMEOUT,10},
 
     {CMV59DX_MCU_ADDR,0xA207},
     {CMV59DX_MCU_DATA,0x000C},
@@ -710,6 +718,634 @@ static struct cmv59dx_reg InitSequence[] =
     {SEQUENCE_END, 0x0000}
 };
 
+static struct cmv59dx_reg InitSequence_video_chat[] =
+{
+//1.Initialize camera
+    {0x001A, 0x0003},
+
+    {SEQUENCE_WAIT_MS, 1},//1
+
+    {0x001A, 0x0000},
+
+    {SEQUENCE_WAIT_MS, 1},//1
+
+    {0x0018, 0x4028}, 
+    {0x001A, 0x0200},
+    {0x001E, 0x0777},//0x0777
+    {0x0016, 0x42DF},
+
+    {CMV59DX_POLL_REG, 0x301A},//add poll_reg
+    {POLL_BIT, 0x0004},
+    {POLL_VALUE, 0},
+    {POLL_DELAY, 10},
+    {POLL_TIMEOUT, 100},
+
+    {CMV59DX_MCU_ADDR,0x02F0},
+    {CMV59DX_MCU_DATA,0x0000},
+    {CMV59DX_MCU_ADDR,0x02F2},
+    {CMV59DX_MCU_DATA,0x0210},
+    {CMV59DX_MCU_ADDR,0x02F4},
+    {CMV59DX_MCU_DATA,0x001A},
+    {CMV59DX_MCU_ADDR,0x2145},
+    {CMV59DX_MCU_DATA,0x02F4},
+    {CMV59DX_MCU_ADDR,0xA134},
+    {CMV59DX_MCU_DATA,0x0001},
+
+    {CMV59DX_MCU_ADDR,0x1078},
+    {CMV59DX_MCU_DATA,0x0000},
+
+//2.Image set ExtClk=18MHz,op_pix=28MHz
+    {CMV59DX_BITFIELD,0x14},
+    {BITFIELD_BIT,1},
+    {BITFIELD_VALUE,1},
+
+    {CMV59DX_BITFIELD,0x14},
+    {BITFIELD_BIT,2},
+    {BITFIELD_VALUE,0},
+
+    {0x0010, 0x0225},
+    {0x0012, 0x0000},
+    {0x0014, 0x244B},
+    {SEQUENCE_WAIT_MS, 1},//1
+    {0x0014, 0x304B},
+
+    {CMV59DX_POLL_REG, 0x0014},//add poll_reg
+    {POLL_BIT, 0x8000},
+    {POLL_VALUE, 0},
+    {POLL_DELAY, 50},
+    {POLL_TIMEOUT, 20},
+
+    {CMV59DX_BITFIELD,0x14},
+    {BITFIELD_BIT,1},
+    {BITFIELD_VALUE,0},
+
+    {CMV59DX_MCU_ADDR,0x2703},
+    {CMV59DX_MCU_DATA,0x0280},
+    {CMV59DX_MCU_ADDR,0x2705},
+    {CMV59DX_MCU_DATA,0x01E0},
+    {CMV59DX_MCU_ADDR,0x2707},
+    {CMV59DX_MCU_DATA,0x0280},
+    {CMV59DX_MCU_ADDR,0x2709},
+    {CMV59DX_MCU_DATA,0x01E0},
+    {CMV59DX_MCU_ADDR,0x270D},
+    {CMV59DX_MCU_DATA,0x0000},
+    {CMV59DX_MCU_ADDR,0x270F},
+    {CMV59DX_MCU_DATA,0x0000},
+    {CMV59DX_MCU_ADDR,0x2711},
+    {CMV59DX_MCU_DATA,0x01E7},
+    {CMV59DX_MCU_ADDR,0x2713},
+    {CMV59DX_MCU_DATA,0x0287},
+    {CMV59DX_MCU_ADDR,0x2715},
+    {CMV59DX_MCU_DATA,0x0001},
+    {CMV59DX_MCU_ADDR,0x2717},
+#ifdef CONFIG_MACH_NBX03
+    {CMV59DX_MCU_DATA,0x0026},
+#else
+    {CMV59DX_MCU_DATA,0x0025},
+#endif
+    {CMV59DX_MCU_ADDR,0x2719},
+    {CMV59DX_MCU_DATA,0x001A},
+    {CMV59DX_MCU_ADDR,0x271B},
+    {CMV59DX_MCU_DATA,0x006B},
+    {CMV59DX_MCU_ADDR,0x271D},
+    {CMV59DX_MCU_DATA,0x006B},
+    {CMV59DX_MCU_ADDR,0x271F},
+    {CMV59DX_MCU_DATA,0x044A},
+    {CMV59DX_MCU_ADDR,0x2721},
+    {CMV59DX_MCU_DATA,0x034A},
+    {CMV59DX_MCU_ADDR,0x2723},
+    {CMV59DX_MCU_DATA,0x0000},
+    {CMV59DX_MCU_ADDR,0x2725},
+    {CMV59DX_MCU_DATA,0x0000},
+    {CMV59DX_MCU_ADDR,0x2727},
+    {CMV59DX_MCU_DATA,0x01E7},
+    {CMV59DX_MCU_ADDR,0x2729},
+    {CMV59DX_MCU_DATA,0x0287},
+    {CMV59DX_MCU_ADDR,0x272B},
+    {CMV59DX_MCU_DATA,0x0001},
+    {CMV59DX_MCU_ADDR,0x272D},
+#ifdef CONFIG_MACH_NBX03
+    {CMV59DX_MCU_DATA,0x0026},
+#else
+    {CMV59DX_MCU_DATA,0x0025},
+#endif
+    {CMV59DX_MCU_ADDR,0x272F},
+    {CMV59DX_MCU_DATA,0x001A},
+    {CMV59DX_MCU_ADDR,0x2731},
+    {CMV59DX_MCU_DATA,0x006B},
+    {CMV59DX_MCU_ADDR,0x2733},
+    {CMV59DX_MCU_DATA,0x006B},
+    {CMV59DX_MCU_ADDR,0x2735},
+    {CMV59DX_MCU_DATA,0x044A},
+    {CMV59DX_MCU_ADDR,0x2737},
+    {CMV59DX_MCU_DATA,0x034A},
+    {CMV59DX_MCU_ADDR,0x2739},
+    {CMV59DX_MCU_DATA,0x0000},
+    {CMV59DX_MCU_ADDR,0x273B},
+    {CMV59DX_MCU_DATA,0x027F},
+    {CMV59DX_MCU_ADDR,0x273D},
+    {CMV59DX_MCU_DATA,0x0000},
+    {CMV59DX_MCU_ADDR,0x273F},
+    {CMV59DX_MCU_DATA,0x01DF},
+    {CMV59DX_MCU_ADDR,0x2747},
+    {CMV59DX_MCU_DATA,0x0000},
+    {CMV59DX_MCU_ADDR,0x2749},
+    {CMV59DX_MCU_DATA,0x027F},
+    {CMV59DX_MCU_ADDR,0x274B},
+    {CMV59DX_MCU_DATA,0x0000},
+    {CMV59DX_MCU_ADDR,0x274D},
+    {CMV59DX_MCU_DATA,0x01DF},
+    {CMV59DX_MCU_ADDR,0x222D},
+    {CMV59DX_MCU_DATA,0x0089},
+    {CMV59DX_MCU_ADDR,0xA408},
+    {CMV59DX_MCU_DATA,0x0021},
+    {CMV59DX_MCU_ADDR,0xA409},
+    {CMV59DX_MCU_DATA,0x0023},
+    {CMV59DX_MCU_ADDR,0xA40A},
+    {CMV59DX_MCU_DATA,0x0028},
+    {CMV59DX_MCU_ADDR,0xA40B},
+    {CMV59DX_MCU_DATA,0x002A},
+    {CMV59DX_MCU_ADDR,0x2411},
+    {CMV59DX_MCU_DATA,0x0089},
+    {CMV59DX_MCU_ADDR,0x2413},
+    {CMV59DX_MCU_DATA,0x00A5},
+    {CMV59DX_MCU_ADDR,0x2415},
+    {CMV59DX_MCU_DATA,0x0089},
+    {CMV59DX_MCU_ADDR,0x2417},
+    {CMV59DX_MCU_DATA,0x00A5},
+    {CMV59DX_MCU_ADDR,0xA404},
+    {CMV59DX_MCU_DATA,0x0010},
+    {CMV59DX_MCU_ADDR,0xA40D},
+    {CMV59DX_MCU_DATA,0x0002},
+    {CMV59DX_MCU_ADDR,0xA40E},
+    {CMV59DX_MCU_DATA,0x0003},
+    {CMV59DX_MCU_ADDR,0xA410},
+    {CMV59DX_MCU_DATA,0x000A},
+
+//for 15-30fps
+    {CMV59DX_MCU_ADDR, 0x271F},
+    {CMV59DX_MCU_DATA, 0x0225},
+    {CMV59DX_MCU_ADDR, 0x2721},
+    {CMV59DX_MCU_DATA, 0x034A},
+    {CMV59DX_MCU_ADDR, 0x2735},
+    {CMV59DX_MCU_DATA, 0x0225},
+    {CMV59DX_MCU_ADDR, 0x2737},
+    {CMV59DX_MCU_DATA, 0x034A},
+    {CMV59DX_MCU_ADDR, 0xA20C},
+    {CMV59DX_MCU_DATA, 0x0008},
+
+//3.Lens Correction V13-FOV66-70%
+    {0x3658, 0x01F0},
+    {0x365A, 0x59CC},
+    {0x365C, 0x5232},
+    {0x365E, 0x006D},
+    {0x3660, 0x8952},
+    {0x3680, 0x3F8A},
+    {0x3682, 0xD10C},
+    {0x3684, 0x5C90},
+    {0x3686, 0xD0B0},
+    {0x3688, 0xA614},
+    {0x36A8, 0x43B2},
+    {0x36AA, 0x4291},
+    {0x36AC, 0x34B6},
+    {0x36AE, 0xF955},
+    {0x36B0, 0xF379},
+    {0x36D0, 0x23B2},
+    {0x36D2, 0x7630},
+    {0x36D4, 0xBA14},
+    {0x36D6, 0xC814},
+    {0x36D8, 0x0FB9},
+    {0x36F8, 0x0E15},
+    {0x36FA, 0xD055},
+    {0x36FC, 0xCFBA},
+    {0x36FE, 0x109A},
+    {0x3700, 0x7FBD},
+    {0x364E, 0x02F0},
+    {0x3650, 0x3D8A},
+    {0x3652, 0x2512},
+    {0x3654, 0x6049},
+    {0x3656, 0x3B2F},
+    {0x3676, 0x8F06},
+    {0x3678, 0xFCEC},
+    {0x367A, 0x3710},
+    {0x367C, 0xB62D},
+    {0x367E, 0xC834},
+    {0x369E, 0x1072},
+    {0x36A0, 0x18F0},
+    {0x36A2, 0x3156},
+    {0x36A4, 0xCCF4},
+    {0x36A6, 0xE8F9},
+    {0x36C6, 0x23F2},
+    {0x36C8, 0xE40F},
+    {0x36CA, 0xA814},
+    {0x36CC, 0x0E52},
+    {0x36CE, 0x5078},
+    {0x36EE, 0x1A75},
+    {0x36F0, 0xB254},
+    {0x36F2, 0xC23A},
+    {0x36F4, 0x7CD8},
+    {0x36F6, 0x5C1D},
+    {0x3662, 0x0230},
+    {0x3664, 0x8D67},
+    {0x3666, 0x1F32},
+    {0x3668, 0xACEC},
+    {0x366A, 0x03AE},
+    {0x368A, 0x9ECC},
+    {0x368C, 0x9B2D},
+    {0x368E, 0x0631},
+    {0x3690, 0x224F},
+    {0x3692, 0xBA54},
+    {0x36B2, 0x0392},
+    {0x36B4, 0x3E50},
+    {0x36B6, 0x27B6},
+    {0x36B8, 0xFC54},
+    {0x36BA, 0xD9F9},
+    {0x36DA, 0x4112},
+    {0x36DC, 0x29F1},
+    {0x36DE, 0x96D4},
+    {0x36E0, 0xF934},
+    {0x36E2, 0x2B18},
+    {0x3702, 0x2615},
+    {0x3704, 0xE9D4},
+    {0x3706, 0xB4DA},
+    {0x3708, 0x3899},
+    {0x370A, 0x52BD},
+    {0x366C, 0x01B0},
+    {0x366E, 0x69EA},
+    {0x3670, 0x2432},
+    {0x3672, 0x30EE},
+    {0x3674, 0x056F},
+    {0x3694, 0xB52A},
+    {0x3696, 0xC12D},
+    {0x3698, 0x4650},
+    {0x369A, 0x640F},
+    {0x369C, 0xBAB4},
+    {0x36BC, 0x0CF2},
+    {0x36BE, 0x0351},
+    {0x36C0, 0x36F6},
+    {0x36C2, 0xA3F5},
+    {0x36C4, 0xF2B9},
+    {0x36E4, 0x2B12},
+    {0x36E6, 0x102F},
+    {0x36E8, 0xE0F4},
+    {0x36EA, 0x88F5},
+    {0x36EC, 0x56B8},
+    {0x370C, 0x1EF5},
+    {0x370E, 0x9075},
+    {0x3710, 0xCC9A},
+    {0x3712, 0x4D59},
+    {0x3714, 0x6BBD},
+    {0x3644, 0x0144},
+    {0x3642, 0x00F4},
+
+    {CMV59DX_BITFIELD,0x3210},
+    {BITFIELD_BIT,0x0008},
+    {BITFIELD_VALUE,1},
+//4.Auto Exposure
+    {CMV59DX_MCU_ADDR, 0xA202},
+    {CMV59DX_MCU_DATA, 0x0000},
+    {CMV59DX_MCU_ADDR, 0xA203},
+    {CMV59DX_MCU_DATA, 0x00FF},
+    {CMV59DX_MCU_ADDR, 0xA208},
+    {CMV59DX_MCU_DATA, 0x0000},
+    {CMV59DX_MCU_ADDR, 0xA24C},
+    {CMV59DX_MCU_DATA, 0x0020},
+    {CMV59DX_MCU_ADDR, 0xA24F},
+    {CMV59DX_MCU_DATA, 0x0051},
+    {CMV59DX_MCU_ADDR, 0xA109},
+    {CMV59DX_MCU_DATA, 0x0020},
+    {CMV59DX_MCU_ADDR, 0xA10A},
+    {CMV59DX_MCU_DATA, 0x0002},
+    {CMV59DX_MCU_ADDR, 0xA20D},
+    {CMV59DX_MCU_DATA, 0x0030},
+    {CMV59DX_MCU_ADDR, 0xA24A},
+    {CMV59DX_MCU_DATA, 0x0028},
+    {CMV59DX_MCU_ADDR, 0xA24B},
+    {CMV59DX_MCU_DATA, 0x0096},
+//AE Dynamic Range Tracking
+    {CMV59DX_MCU_ADDR,0xA11D},
+    {CMV59DX_MCU_DATA,0x0001},
+    {CMV59DX_MCU_ADDR,0xA129},
+    {CMV59DX_MCU_DATA,0x0001},
+//Refresh
+    {CMV59DX_MCU_ADDR,0xA103},
+    {CMV59DX_MCU_DATA,0x0006},
+
+    {CMV59DX_POLL_FIELD,SEQ_CMD},
+    {POLL_FIELD_VALUE,0},
+    {POLL_FIELD_DELAY,10},
+    {POLL_FIELD_TIMEOUT,50},
+
+    {CMV59DX_MCU_ADDR,0xA103},
+    {CMV59DX_MCU_DATA,0x0005},
+
+    {CMV59DX_POLL_FIELD,SEQ_CMD},
+    {POLL_FIELD_VALUE,0},
+    {POLL_FIELD_DELAY,10},
+    {POLL_FIELD_TIMEOUT,50},
+
+//AE Convergence
+    {CMV59DX_MCU_ADDR,0xA207},
+    {CMV59DX_MCU_DATA,0x0004},
+
+    {CMV59DX_POLL_FIELD,AE_STATUS_READY},
+    {POLL_FIELD_VALUE,1},
+    {POLL_FIELD_DELAY,100},
+    {POLL_FIELD_TIMEOUT,10},
+
+    {CMV59DX_MCU_ADDR,0xA207},
+    {CMV59DX_MCU_DATA,0x000C},
+
+//5.Auto White Balance
+    {CMV59DX_MCU_ADDR,0xA35D},
+    {CMV59DX_MCU_DATA,0x007B},
+    {CMV59DX_MCU_ADDR,0xA35E},
+    {CMV59DX_MCU_DATA,0x0085},
+    {CMV59DX_MCU_ADDR,0xA35F},
+    {CMV59DX_MCU_DATA,0x007E},
+    {CMV59DX_MCU_ADDR,0xA360},
+    {CMV59DX_MCU_DATA,0x0082},
+    {CMV59DX_MCU_ADDR,0x2361},
+    {CMV59DX_MCU_DATA,0x0040},
+    {CMV59DX_MCU_ADDR,0xA302},
+    {CMV59DX_MCU_DATA,0x0000},
+    {CMV59DX_MCU_ADDR,0xA303},
+    {CMV59DX_MCU_DATA,0x00FF},
+    {0x323E,0xC22C},
+    {0x3244,0x0335},
+    {0x3240,0x6214},
+
+//6.Noise Reduction
+    {0x31E0,0x0001},
+
+//7.Gamma Correction
+    {0x322A,0x0004},
+    {0x35B0,0x049D},
+    {CMV59DX_MCU_ADDR,0xAB04},
+    {CMV59DX_MCU_DATA,0x0020},
+    {CMV59DX_MCU_ADDR,0xAB37},
+    {CMV59DX_MCU_DATA,0x0003},
+    {CMV59DX_MCU_ADDR,0x2B28},
+    {CMV59DX_MCU_DATA,0x1388},
+    {CMV59DX_MCU_ADDR,0x2B2A},
+    {CMV59DX_MCU_DATA,0x4E20},
+    {CMV59DX_MCU_ADDR,0x2B38},
+    {CMV59DX_MCU_DATA,0x0100},
+    {CMV59DX_MCU_ADDR,0x2B3A},
+    {CMV59DX_MCU_DATA,0x20CC},
+    {CMV59DX_MCU_ADDR,0xAB22},
+    {CMV59DX_MCU_DATA,0x0002},
+    {CMV59DX_MCU_ADDR,0xAB26},
+    {CMV59DX_MCU_DATA,0x0001},
+    {CMV59DX_MCU_ADDR,0xAB1F},
+    {CMV59DX_MCU_DATA,0x00C7},
+    {CMV59DX_MCU_ADDR,0xAB31},
+    {CMV59DX_MCU_DATA,0x001E},
+    {CMV59DX_MCU_ADDR,0xAB36},
+    {CMV59DX_MCU_DATA,0x0016},
+ 
+//8.Mode :Plain
+//8.1 Digital Gain:Normal
+    {0x3032, 0x0100},
+    {0x3034, 0x0100},
+    {0x3036, 0x0100},
+    {0x3038, 0x0100},
+//8.2 AE target :0
+    {CMV59DX_MCU_ADDR,0xA24F},
+    {CMV59DX_MCU_DATA,0x0051},
+//AE Dynamic Range Tracking
+    {CMV59DX_MCU_ADDR,0xA11D},
+    {CMV59DX_MCU_DATA,0x0001},
+    {CMV59DX_MCU_ADDR,0xA129},
+    {CMV59DX_MCU_DATA,0x0001},
+//Refresh
+    {CMV59DX_MCU_ADDR,0xA103},
+    {CMV59DX_MCU_DATA,0x0006},
+
+    {CMV59DX_POLL_FIELD,SEQ_CMD},
+    {POLL_FIELD_VALUE,0},
+    {POLL_FIELD_DELAY,10},
+    {POLL_FIELD_TIMEOUT,50},
+
+    {CMV59DX_MCU_ADDR,0xA103},
+    {CMV59DX_MCU_DATA,0x0005},
+
+    {CMV59DX_POLL_FIELD,SEQ_CMD},
+    {POLL_FIELD_VALUE,0},
+    {POLL_FIELD_DELAY,10},
+    {POLL_FIELD_TIMEOUT,50},
+
+//AE Convergence
+    {CMV59DX_MCU_ADDR,0xA207},
+    {CMV59DX_MCU_DATA,0x0004},
+
+    {CMV59DX_POLL_FIELD,AE_STATUS_READY},
+    {POLL_FIELD_VALUE,1},
+    {POLL_FIELD_DELAY,100},
+    {POLL_FIELD_TIMEOUT,10},
+
+    {CMV59DX_MCU_ADDR,0xA207},
+    {CMV59DX_MCU_DATA,0x000C},
+//8.3 Gamma Table :Normal Contrast
+    {CMV59DX_MCU_ADDR,0xAB3C},
+    {CMV59DX_MCU_DATA,0x0000},
+    {CMV59DX_MCU_ADDR,0xAB3D},
+    {CMV59DX_MCU_DATA,0x000B},
+    {CMV59DX_MCU_ADDR,0xAB3E},
+    {CMV59DX_MCU_DATA,0x0020},
+    {CMV59DX_MCU_ADDR,0xAB3F},
+    {CMV59DX_MCU_DATA,0x003B},
+    {CMV59DX_MCU_ADDR,0xAB40},
+    {CMV59DX_MCU_DATA,0x005B},
+    {CMV59DX_MCU_ADDR,0xAB41},
+    {CMV59DX_MCU_DATA,0x0072},
+    {CMV59DX_MCU_ADDR,0xAB42},
+    {CMV59DX_MCU_DATA,0x0085},
+    {CMV59DX_MCU_ADDR,0xAB43},
+    {CMV59DX_MCU_DATA,0x0096},
+    {CMV59DX_MCU_ADDR,0xAB44},
+    {CMV59DX_MCU_DATA,0x00A4},
+    {CMV59DX_MCU_ADDR,0xAB45},
+    {CMV59DX_MCU_DATA,0x00B1},
+    {CMV59DX_MCU_ADDR,0xAB46},
+    {CMV59DX_MCU_DATA,0x00BC},
+    {CMV59DX_MCU_ADDR,0xAB47},
+    {CMV59DX_MCU_DATA,0x00C6},
+    {CMV59DX_MCU_ADDR,0xAB48},
+    {CMV59DX_MCU_DATA,0x00D0},
+    {CMV59DX_MCU_ADDR,0xAB49},
+    {CMV59DX_MCU_DATA,0x00D9},
+    {CMV59DX_MCU_ADDR,0xAB4A},
+    {CMV59DX_MCU_DATA,0x00E2},
+    {CMV59DX_MCU_ADDR,0xAB4B},
+    {CMV59DX_MCU_DATA,0x00EA},
+    {CMV59DX_MCU_ADDR,0xAB4C},
+    {CMV59DX_MCU_DATA,0x00F1},
+    {CMV59DX_MCU_ADDR,0xAB4D},
+    {CMV59DX_MCU_DATA,0x00F8},
+    {CMV59DX_MCU_ADDR,0xAB4E},
+    {CMV59DX_MCU_DATA,0x00FF},
+    {CMV59DX_MCU_ADDR,0xAB4F},
+    {CMV59DX_MCU_DATA,0x0000},
+    {CMV59DX_MCU_ADDR,0xAB50},
+    {CMV59DX_MCU_DATA,0x000B},
+    {CMV59DX_MCU_ADDR,0xAB51},
+    {CMV59DX_MCU_DATA,0x0023},
+    {CMV59DX_MCU_ADDR,0xAB52},
+    {CMV59DX_MCU_DATA,0x004D},
+    {CMV59DX_MCU_ADDR,0xAB53},
+    {CMV59DX_MCU_DATA,0x0071},
+    {CMV59DX_MCU_ADDR,0xAB54},
+    {CMV59DX_MCU_DATA,0x0088},
+    {CMV59DX_MCU_ADDR,0xAB55},
+    {CMV59DX_MCU_DATA,0x009A},
+    {CMV59DX_MCU_ADDR,0xAB56},
+    {CMV59DX_MCU_DATA,0x00A9},
+    {CMV59DX_MCU_ADDR,0xAB57},
+    {CMV59DX_MCU_DATA,0x00B5},
+    {CMV59DX_MCU_ADDR,0xAB58},
+    {CMV59DX_MCU_DATA,0x00C0},
+    {CMV59DX_MCU_ADDR,0xAB59},
+    {CMV59DX_MCU_DATA,0x00C9},
+    {CMV59DX_MCU_ADDR,0xAB5A},
+    {CMV59DX_MCU_DATA,0x00D2},
+    {CMV59DX_MCU_ADDR,0xAB5B},
+    {CMV59DX_MCU_DATA,0x00DA},
+    {CMV59DX_MCU_ADDR,0xAB5C},
+    {CMV59DX_MCU_DATA,0x00E1},
+    {CMV59DX_MCU_ADDR,0xAB5D},
+    {CMV59DX_MCU_DATA,0x00E8},
+    {CMV59DX_MCU_ADDR,0xAB5E},
+    {CMV59DX_MCU_DATA,0x00EE},
+    {CMV59DX_MCU_ADDR,0xAB5F},
+    {CMV59DX_MCU_DATA,0x00F4},
+    {CMV59DX_MCU_ADDR,0xAB60},
+    {CMV59DX_MCU_DATA,0x00FA},
+    {CMV59DX_MCU_ADDR,0xAB61},
+    {CMV59DX_MCU_DATA,0x00FF},
+//8.4.Manual WB->Auto WB 
+//CCM :Original
+    {CMV59DX_MCU_ADDR,0x2306},
+    {CMV59DX_MCU_DATA,0x038A},
+    {CMV59DX_MCU_ADDR,0x2308},
+    {CMV59DX_MCU_DATA,0xFDDD},
+    {CMV59DX_MCU_ADDR,0x230A},
+    {CMV59DX_MCU_DATA,0x003A},
+    {CMV59DX_MCU_ADDR,0x230C},
+    {CMV59DX_MCU_DATA,0xFF42},
+    {CMV59DX_MCU_ADDR,0x230E},
+    {CMV59DX_MCU_DATA,0x02D7},
+    {CMV59DX_MCU_ADDR,0x2310},
+    {CMV59DX_MCU_DATA,0xFF67},
+    {CMV59DX_MCU_ADDR,0x2312},
+    {CMV59DX_MCU_DATA,0xFF5D},
+    {CMV59DX_MCU_ADDR,0x2314},
+    {CMV59DX_MCU_DATA,0xFD98},
+    {CMV59DX_MCU_ADDR,0x2316},
+    {CMV59DX_MCU_DATA,0x0437},
+    {CMV59DX_MCU_ADDR,0x2318},
+    {CMV59DX_MCU_DATA,0x0015},
+    {CMV59DX_MCU_ADDR,0x231A},
+    {CMV59DX_MCU_DATA,0x003C},
+    {CMV59DX_MCU_ADDR,0x231C},
+    {CMV59DX_MCU_DATA,0xFF30},
+    {CMV59DX_MCU_ADDR,0x231E},
+    {CMV59DX_MCU_DATA,0x0092},
+    {CMV59DX_MCU_ADDR,0x2320},
+    {CMV59DX_MCU_DATA,0xFFD1},
+    {CMV59DX_MCU_ADDR,0x2322},
+    {CMV59DX_MCU_DATA,0x0041},
+    {CMV59DX_MCU_ADDR,0x2324},
+    {CMV59DX_MCU_DATA,0xFFD4},
+    {CMV59DX_MCU_ADDR,0x2326},
+    {CMV59DX_MCU_DATA,0xFFB8},
+    {CMV59DX_MCU_ADDR,0x2328},
+    {CMV59DX_MCU_DATA,0x0085},
+    {CMV59DX_MCU_ADDR,0x232A},
+    {CMV59DX_MCU_DATA,0x0199},
+    {CMV59DX_MCU_ADDR,0x232C},
+    {CMV59DX_MCU_DATA,0xFDE2},
+    {CMV59DX_MCU_ADDR,0x232E},
+    {CMV59DX_MCU_DATA,0x0010},
+    {CMV59DX_MCU_ADDR,0x2330},
+    {CMV59DX_MCU_DATA,0xFFE9},
+    {CMV59DX_MCU_ADDR,0xAB20},
+    {CMV59DX_MCU_DATA,0x0068},
+    {CMV59DX_MCU_ADDR,0xAB24},
+    {CMV59DX_MCU_DATA,0x0028},
+    {CMV59DX_MCU_ADDR,0xA365},
+    {CMV59DX_MCU_DATA,0x0020},
+    {CMV59DX_MCU_ADDR,0xA366},
+    {CMV59DX_MCU_DATA,0x00F0},
+    {CMV59DX_MCU_ADDR,0xA367},
+    {CMV59DX_MCU_DATA,0x00A0},
+    {CMV59DX_MCU_ADDR,0xA368},
+    {CMV59DX_MCU_DATA,0x0060},
+    {CMV59DX_MCU_ADDR,0xA363},
+    {CMV59DX_MCU_DATA,0x00D5},
+    {CMV59DX_MCU_ADDR,0xA364},
+    {CMV59DX_MCU_DATA,0x00ED},
+    {CMV59DX_MCU_ADDR,0xA34A},
+    {CMV59DX_MCU_DATA,0x0076},
+    {CMV59DX_MCU_ADDR,0xA34B},
+    {CMV59DX_MCU_DATA,0x00D9},
+    {CMV59DX_MCU_ADDR,0xA34C},
+    {CMV59DX_MCU_DATA,0x0060},
+    {CMV59DX_MCU_ADDR,0xA34D},
+    {CMV59DX_MCU_DATA,0x00C7},
+    {CMV59DX_MCU_ADDR,0xA369},
+    {CMV59DX_MCU_DATA,0x0082},
+    {CMV59DX_MCU_ADDR,0xA36A},
+    {CMV59DX_MCU_DATA,0x0082},
+    {CMV59DX_MCU_ADDR,0xA36B},
+    {CMV59DX_MCU_DATA,0x0082},
+//
+    {CMV59DX_MCU_ADDR,0xA115},
+    {CMV59DX_MCU_DATA,0x0072},
+    {CMV59DX_MCU_ADDR,0xA11F},
+    {CMV59DX_MCU_DATA,0x0001},
+    {CMV59DX_MCU_ADDR,0xA103},
+    {CMV59DX_MCU_DATA,0x0005},
+
+    {CMV59DX_POLL_FIELD,SEQ_CMD},
+    {POLL_FIELD_VALUE,0},
+    {POLL_FIELD_DELAY,10},
+    {POLL_FIELD_TIMEOUT,50},
+
+//8.5 Sharpness :0
+    {0x326C,0x1000},
+    {CMV59DX_MCU_ADDR,0xAB22},
+    {CMV59DX_MCU_DATA,0x0002},
+
+//8.6 Refresh
+//Refresh
+    {CMV59DX_MCU_ADDR,0xA103},
+    {CMV59DX_MCU_DATA,0x0006},
+
+    {CMV59DX_POLL_FIELD,SEQ_CMD},
+    {POLL_FIELD_VALUE,0},
+    {POLL_FIELD_DELAY,10},
+    {POLL_FIELD_TIMEOUT,50},
+
+    {CMV59DX_MCU_ADDR,0xA103},
+    {CMV59DX_MCU_DATA,0x0005},
+
+    {CMV59DX_POLL_FIELD,SEQ_CMD},
+    {POLL_FIELD_VALUE,0},
+    {POLL_FIELD_DELAY,10},
+    {POLL_FIELD_TIMEOUT,50},
+//9
+/*
+ *bit 2 of registers 0x3400
+ *0 :Asserted to transmit a continuous MIPI output clock
+ *1 :Clock is only active while data is being transmitted.
+ */ 
+    {0x3400, 0x7A20},//change from 0x7A2C to 0x7A20
+    {0x001A, 0x0000},
+    {SEQUENCE_END, 0x0000}
+};
+
+
 static struct cmv59dx_reg SetModeSequence_640x480[] = 
 {
     {CMV59DX_MCU_ADDR, 0x2739},   // MODE_CROP_X0_A
@@ -894,6 +1530,38 @@ static struct cmv59dx_reg SetModeSequence_fps_auto[] = {
     {SEQUENCE_END,   0x0000}
 };
 */
+
+static struct cmv59dx_reg SetModeSequence_videochat_on[] = {
+    {CMV59DX_MCU_ADDR, 0x271F},
+    {CMV59DX_MCU_DATA, 0x0225},
+    {CMV59DX_MCU_ADDR, 0x2721},
+    {CMV59DX_MCU_DATA, 0x034A},
+    {CMV59DX_MCU_ADDR, 0x2735},
+    {CMV59DX_MCU_DATA, 0x0225},
+    {CMV59DX_MCU_ADDR, 0x2737},
+    {CMV59DX_MCU_DATA, 0x034A},
+    {CMV59DX_MCU_ADDR, 0xA20C},
+    {CMV59DX_MCU_DATA, 0x0008},
+
+    {CMV59DX_MCU_ADDR,0xA103},
+    {CMV59DX_MCU_DATA,0x0006},
+
+    {CMV59DX_POLL_FIELD,SEQ_CMD},
+    {POLL_FIELD_VALUE,0},
+    {POLL_FIELD_DELAY,10},
+    {POLL_FIELD_TIMEOUT,50},
+
+    {CMV59DX_MCU_ADDR,0xA103},
+    {CMV59DX_MCU_DATA,0x0005},
+
+    {CMV59DX_POLL_FIELD,SEQ_CMD},
+    {POLL_FIELD_VALUE,0},
+    {POLL_FIELD_DELAY,10},
+    {POLL_FIELD_TIMEOUT,50},
+
+    {SEQUENCE_END,   0x0000}
+};
+
 static struct cmv59dx_reg SetModeSequence_fps_30[] = {
     {CMV59DX_MCU_ADDR, 0x271F},
     {CMV59DX_MCU_DATA, 0x0225},
@@ -905,6 +1573,9 @@ static struct cmv59dx_reg SetModeSequence_fps_30[] = {
     {CMV59DX_MCU_DATA, 0x034A},
     {CMV59DX_MCU_ADDR, 0xA20C},
     {CMV59DX_MCU_DATA, 0x0004},
+
+    {CMV59DX_MCU_ADDR,0xA103},
+    {CMV59DX_MCU_DATA,0x0006},
 
     {CMV59DX_POLL_FIELD,SEQ_CMD},
     {POLL_FIELD_VALUE,0},
@@ -961,6 +1632,9 @@ static struct cmv59dx_reg SetModeSequence_fps_15[] = {
     {CMV59DX_MCU_DATA, 0x034A},
     {CMV59DX_MCU_ADDR, 0xA20C},
     {CMV59DX_MCU_DATA, 0x0008},
+
+    {CMV59DX_MCU_ADDR,0xA103},
+    {CMV59DX_MCU_DATA,0x0006},
 
     {CMV59DX_POLL_FIELD,SEQ_CMD},
     {POLL_FIELD_VALUE,0},
@@ -1310,7 +1984,7 @@ static int cmv59dx_set_mode(struct cmv59dx_info *info, struct cmv59dx_mode *mode
 static int cmv59dx_init_dev(struct cmv59dx_info *info, u32 arg)
 {
     int err = 0;
-    err = cmv59dx_write_table(info->i2c_client, InitSequence,  NULL, 0);
+    err = cmv59dx_write_table(info->i2c_client, is_cmv59dx_video_chat == CMV59DX_VIDEO_CHAT_ON ? InitSequence_video_chat : InitSequence,  NULL, 0);
     printk("%s\n",__func__);
     
     return err;
@@ -1319,6 +1993,15 @@ static int cmv59dx_init_dev(struct cmv59dx_info *info, u32 arg)
 static int cmv59dx_set_fps(struct cmv59dx_info *info, u8 fps)
 {
     int status = 0;
+/*
+ * if we use video-chat for NBX02 VGA camera,we can only use reserve variable frame rate,
+ * and can not set fixed 15fps or 30fps.
+ */ 
+#ifdef CONFIG_MACH_NBX02
+    if (is_cmv59dx_video_chat == CMV59DX_VIDEO_CHAT_ON){
+        return 0;
+    }
+#endif
     printk("%s,   fps =%d\n",__func__,fps);
     switch(fps){
         case 30:
@@ -1341,6 +2024,28 @@ static int cmv59dx_set_fps(struct cmv59dx_info *info, u8 fps)
 
     return 0;
 }
+
+static int cmv59dx_set_video_chat(struct cmv59dx_info *info, bool data)
+{
+    int status = 0;
+    is_cmv59dx_video_chat = data;
+    printk("fun=%s  is_cmv59dx_video_chat=%d\n",__func__,is_cmv59dx_video_chat);
+#ifdef CONFIG_MACH_NBX02
+    switch (data) {
+        case CMV59DX_VIDEO_CHAT_ON:
+            status = cmv59dx_write_table(info->i2c_client, SetModeSequence_videochat_on, NULL, 0);
+            if (status){
+                printk("%s -> %d error\n",__func__,data);
+                return status;
+            }
+            break;
+        default:
+            break;
+    }
+#endif
+    return 0;
+}
+
 static long cmv59dx_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
     struct cmv59dx_info *info = file->private_data;
@@ -1363,6 +2068,8 @@ static long cmv59dx_ioctl(struct file *file, unsigned int cmd, unsigned long arg
         return cmv59dx_init_dev(info, (u32)arg);
     case CMV59DX_IOCTL_SET_FPS:
         return cmv59dx_set_fps(info, (u8)arg);
+    case CMV59DX_IOCTL_SET_VIDEO_CHAT:
+        return cmv59dx_set_video_chat(info, (bool)arg);
     default:
         return -EINVAL;
     }
@@ -1420,6 +2127,7 @@ static int cmv59dx_open(struct inode *inode, struct file *file)
 #ifdef CONFIG_MACH_NBX03
     nbx03_cmv59dx_power_on();
 #endif
+    is_cmv59dx_video_chat = CMV59DX_VIDEO_CHAT_OFF;
     return 0;
 }
 
@@ -1430,6 +2138,7 @@ int cmv59dx_release(struct inode *inode, struct file *file)
     nbx03_cmv59dx_power_off();
 #endif
     file->private_data = NULL;
+    is_cmv59dx_video_chat = CMV59DX_VIDEO_CHAT_OFF;
     return 0;
 }
 

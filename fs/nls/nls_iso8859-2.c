@@ -1,4 +1,3 @@
-/* 2011-06-10: File changed by Sony Corporation */
 /*
  * linux/fs/nls/nls_iso8859-2.c
  *

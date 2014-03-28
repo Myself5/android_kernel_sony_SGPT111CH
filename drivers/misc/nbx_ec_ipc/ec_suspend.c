@@ -1,6 +1,5 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.
@@ -12,13 +11,11 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
-/* EC SUSPEND */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/slab.h>
-#include <linux/platform_device.h>
 #include <linux/suspend.h>
 #include <linux/reboot.h>
 #include <linux/err.h>
@@ -63,10 +60,9 @@ static int ec_suspend_send_powerstate_change(uint8_t next_state, int async)
 	req_buf[EC_POWERSTATE_CHANGE_NEXT] = next_state;
 
 	if(async == 0) {
-		ret = ec_ipc_send_request_timeout(EC_IPC_PID_POWERSTATE, EC_IPC_CID_POWERSTATE_CHANGE,
-						req_buf, sizeof(req_buf),
-						res_buf, sizeof(res_buf),
-						3000);
+		ret = ec_ipc_send_request(EC_IPC_PID_POWERSTATE, EC_IPC_CID_POWERSTATE_CHANGE,
+					req_buf, sizeof(req_buf),
+					res_buf, sizeof(res_buf));
 		if(ret < (int)sizeof(res_buf)) {
 			pr_err("ec_suspend: ec_ipc_send_request(POWERSTATE_CHANGE) failed. %d\n", ret);
 			return -EIO;
@@ -109,10 +105,9 @@ static int ec_suspend_send_reserve_reboot(int enable)
 
 	req_buf[RESERVE_REBOOT_ENABLE] = (enable == 0) ? 0 : 1;
 
-	ret = ec_ipc_send_request_timeout(EC_IPC_PID_POWERSTATE, EC_IPC_CID_RESERVE_REBOOT,
+	ret = ec_ipc_send_request(EC_IPC_PID_POWERSTATE, EC_IPC_CID_RESERVE_REBOOT,
 					req_buf, sizeof(req_buf),
-					res_buf, sizeof(res_buf),
-					3000);
+					res_buf, sizeof(res_buf));
 
 	if(ret < (int)sizeof(res_buf)) {
 		pr_err("ec_suspend: ec_ipc_send_request(RESERVE_REBOOT) failed. %d\n", ret);
@@ -148,7 +143,7 @@ static struct early_suspend ec_suspend_earlysuspend =
 };
 #endif
 
-int nbx_ec_suspend_suspend(pm_message_t state)
+int nbx_ec_suspend_suspend(void)
 {
 	ec_suspend_send_powerstate_change(EC_POWERSTATE_S3, 0);
 	return 0;
@@ -157,12 +152,8 @@ EXPORT_SYMBOL(nbx_ec_suspend_suspend);
 
 int nbx_ec_suspend_resume(void)
 {
-	if(atomic_read(&ec_suspend_earlysuspending) != 0) {
-		ec_suspend_send_powerstate_change(EC_POWERSTATE_ES, 1);
-	}
-	else {
-		ec_suspend_send_powerstate_change(EC_POWERSTATE_S0, 0);
-	}
+	/* async */
+	ec_suspend_send_powerstate_change((atomic_read(&ec_suspend_earlysuspending) != 0) ? EC_POWERSTATE_ES : EC_POWERSTATE_S0, 1);
 	return 0;
 }
 EXPORT_SYMBOL(nbx_ec_suspend_resume);
@@ -197,7 +188,7 @@ static struct notifier_block ec_suspend_reboot_notifier = {
 	.priority = 0,
 };
 
-static int __init ec_suspend_probe(struct platform_device* pdev)
+static int __init ec_suspend_probe(struct nbx_ec_ipc_device* edev)
 {
 	atomic_set(&ec_suspend_earlysuspending, 0);
 
@@ -209,7 +200,7 @@ static int __init ec_suspend_probe(struct platform_device* pdev)
 
 	return 0;
 }
-static int ec_suspend_remove(struct platform_device* pdev)
+static int ec_suspend_remove(struct nbx_ec_ipc_device* edev)
 {
 	unregister_reboot_notifier(&ec_suspend_reboot_notifier);
 
@@ -220,36 +211,29 @@ static int ec_suspend_remove(struct platform_device* pdev)
 	return 0;
 }
 
-static struct platform_driver ec_suspend_driver = {
-	.probe    = ec_suspend_probe,
-	.remove   = ec_suspend_remove,
-	.driver   = {
-		.name = "ec_suspend",
+static struct nbx_ec_ipc_driver ec_ipc_suspend_driver = {
+	.probe   = ec_suspend_probe,
+	.remove  = ec_suspend_remove,
+	.drv     = {
+		.name = "ec_ipc_suspend",
 	},
 };
-
-static struct platform_device* ec_suspend_dev;
 
 static int __init ec_suspend_init(void)
 {
 	int ret;
 
-	ret = platform_driver_register(&ec_suspend_driver);
-	if(ret < 0) return ret;
-
-	ret = 0;
-	ec_suspend_dev = platform_device_register_simple("ec_suspend", 0, NULL, 0);
-	if (IS_ERR(ec_suspend_dev)) {
-		ret = PTR_ERR(ec_suspend_dev);
-		platform_driver_unregister(&ec_suspend_driver);
+	ret = nbx_ec_ipc_driver_register(&ec_ipc_suspend_driver);
+	if (ret < 0) {
+		pr_err("%s:nbx_ec_ipc_driver_register() failed, %d\n", __func__, ret);
+		return ret;
 	}
 
-	return ret;
+	return 0;
 }
 static void __exit ec_suspend_exit(void)
 {
-	platform_device_unregister(ec_suspend_dev);
-	platform_driver_unregister(&ec_suspend_driver);
+	nbx_ec_ipc_driver_unregister(&ec_ipc_suspend_driver);
 }
 
 module_init(ec_suspend_init);

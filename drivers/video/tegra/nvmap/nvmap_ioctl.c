@@ -144,16 +144,6 @@ int nvmap_ioctl_getid(struct file *filp, void __user *arg)
 
 	h = nvmap_get_handle_id(client, op.handle);
 
-#ifdef CONFIG_NVMAP_SEARCH_GLOBAL_HANDLES
-	/*
-	 * Check for device-wide global handles. This may be needed in broken
-	 * memory sharing scenarios when handles are passed from client to
-	 * client instead of the memory IDs.
-	 */
-	if (!h)
-		h = nvmap_validate_get(client, op.handle);
-#endif
-
 	if (!h)
 		return -EPERM;
 
@@ -230,6 +220,7 @@ int nvmap_map_into_caller_ptr(struct file *filp, void __user *arg)
 	struct nvmap_vma_priv *vpriv;
 	struct vm_area_struct *vma;
 	struct nvmap_handle *h = NULL;
+	unsigned int cache_flags;
 	int err = 0;
 
 	if (copy_from_user(&op, arg, sizeof(op)))
@@ -293,16 +284,30 @@ int nvmap_map_into_caller_ptr(struct file *filp, void __user *arg)
 	vpriv->handle = h;
 	vpriv->offs = op.offset;
 
-	if (op.flags == NVMAP_HANDLE_INNER_CACHEABLE) {
-		if (h->orig_size & ~PAGE_MASK) {
+	cache_flags = op.flags & NVMAP_HANDLE_CACHE_FLAG;
+	if ((cache_flags == NVMAP_HANDLE_INNER_CACHEABLE ||
+	     cache_flags == NVMAP_HANDLE_CACHEABLE) &&
+	    (h->flags == NVMAP_HANDLE_UNCACHEABLE ||
+	     h->flags == NVMAP_HANDLE_WRITE_COMBINE)) {
+		if (h->size & ~PAGE_MASK) {
 			pr_err("\n%s:attempt to convert a buffer from uc/wc to"
 				" wb, whose size is not a multiple of page size."
 				" request ignored.\n", __func__);
 		} else {
+			unsigned int nr_page = h->size >> PAGE_SHIFT;
 			wmb();
 			/* override allocation time cache coherency attributes. */
-			h->flags &= (~NVMAP_HANDLE_CACHEABLE);
-			h->flags |= NVMAP_HANDLE_INNER_CACHEABLE;
+			h->flags &= ~NVMAP_HANDLE_CACHE_FLAG;
+			h->flags |= cache_flags;
+
+			/* Update page attributes, if the memory is allocated
+			 *  from system heap pages.
+			 */
+			if (cache_flags == NVMAP_HANDLE_INNER_CACHEABLE &&
+				h->heap_pgalloc)
+				set_pages_array_iwb(h->pgalloc.pages, nr_page);
+			else if (h->heap_pgalloc)
+				set_pages_array_wb(h->pgalloc.pages, nr_page);
 		}
 	}
 	vma->vm_page_prot = nvmap_pgprot(h, vma->vm_page_prot);
@@ -352,8 +357,7 @@ int nvmap_ioctl_get_param(struct file *filp, void __user* arg)
 			mutex_lock(&h->lock);
 			op.result = h->carveout->base;
 			mutex_unlock(&h->lock);
-		}
-		else if (h->pgalloc.contig)
+		} else if (h->pgalloc.contig)
 			op.result = page_to_phys(h->pgalloc.pages[0]);
 		else if (h->pgalloc.area)
 			op.result = h->pgalloc.area->iovm_start;
@@ -367,8 +371,7 @@ int nvmap_ioctl_get_param(struct file *filp, void __user* arg)
 			mutex_lock(&h->lock);
 			op.result = nvmap_carveout_usage(client, h->carveout);
 			mutex_unlock(&h->lock);
-		}
-		else if (h->pgalloc.contig)
+		} else if (h->pgalloc.contig)
 			op.result = NVMAP_HEAP_SYSMEM;
 		else
 			op.result = NVMAP_HEAP_IOVMM;
@@ -537,15 +540,14 @@ static bool fast_cache_maint(struct nvmap_client *client, struct nvmap_handle *h
 {
 	int ret = false;
 
-	if ( (op == NVMAP_CACHE_OP_INV) ||
-		((end - start) < FLUSH_CLEAN_BY_SET_WAY_THRESHOLD) )
+	if ((op == NVMAP_CACHE_OP_INV) ||
+		((end - start) < FLUSH_CLEAN_BY_SET_WAY_THRESHOLD))
 		goto out;
 
-	if (op == NVMAP_CACHE_OP_WB_INV) {
+	if (op == NVMAP_CACHE_OP_WB_INV)
 		inner_flush_cache_all();
-	} else if (op == NVMAP_CACHE_OP_WB) {
+	else if (op == NVMAP_CACHE_OP_WB)
 		inner_clean_cache_all();
-	}
 
 	if (h->heap_pgalloc && (h->flags != NVMAP_HANDLE_INNER_CACHEABLE)) {
 		heap_page_cache_maint(client, h, start, end, op,
@@ -578,9 +580,9 @@ static int cache_maint(struct nvmap_client *client, struct nvmap_handle *h,
 		goto out;
 	}
 
+	wmb();
 	if (h->flags == NVMAP_HANDLE_UNCACHEABLE ||
-	    h->flags == NVMAP_HANDLE_WRITE_COMBINE ||
-	    start == end)
+	    h->flags == NVMAP_HANDLE_WRITE_COMBINE || start == end)
 		goto out;
 
 	if (fast_cache_maint(client, h, start, end, op))
@@ -637,12 +639,11 @@ out:
 	if (pte)
 		nvmap_free_pte(client->dev, pte);
 	nvmap_handle_put(h);
-	wmb();
 	return err;
 }
 
 static int rw_handle_page(struct nvmap_handle *h, int is_read,
-			  unsigned long start, unsigned long rw_addr,
+			  phys_addr_t start, unsigned long rw_addr,
 			  unsigned long bytes, unsigned long kaddr, pte_t *pte)
 {
 	pgprot_t prot = nvmap_pgprot(h, pgprot_kernel);
@@ -651,7 +652,7 @@ static int rw_handle_page(struct nvmap_handle *h, int is_read,
 
 	while (!err && start < end) {
 		struct page *page = NULL;
-		unsigned long phys;
+		phys_addr_t phys;
 		size_t count;
 		void *src;
 
@@ -724,7 +725,7 @@ static ssize_t rw_handle(struct nvmap_client *client, struct nvmap_handle *h,
 			ret = -EFAULT;
 			break;
 		}
-		if(is_read)
+		if (is_read)
 			cache_maint(client, h, h_offs,
 				h_offs + elem_size, NVMAP_CACHE_OP_INV);
 
@@ -734,7 +735,7 @@ static ssize_t rw_handle(struct nvmap_client *client, struct nvmap_handle *h,
 		if (ret)
 			break;
 
-		if(!is_read)
+		if (!is_read)
 			cache_maint(client, h, h_offs,
 				h_offs + elem_size, NVMAP_CACHE_OP_WB);
 

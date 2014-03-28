@@ -1,4 +1,3 @@
-/* 2011-06-10: File added by Sony Corporation */
 /*
  * Copyright (C) 2011 Sony Corporation
  * This program is free software; you can redistribute it and/or modify

@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * arch/arm/mach-tegra/board-harmony-sdhci.c
  *
@@ -32,6 +32,16 @@
 #include "gpio-names.h"
 #include "board.h"
 #include "wireless_power_control.h"
+
+static struct platform_device wlan_ar6000_pm_device = {
+	.name		= "wlan_ar6000_pm_dev",
+	.id		= -1,
+};
+
+static int __init ar6000_pm_init(void)
+{
+	return platform_device_register(&wlan_ar6000_pm_device);
+}
 
 static struct resource sdhci_resource0[] = {
 	[0] = {
@@ -72,11 +82,8 @@ static struct resource sdhci_resource3[] = {
 	},
 };
 
-
-static struct tegra_sdhci_platform_data tegra_sdhci_platform_data0 = {
-	.clk_id = NULL,
-	.force_hs = 0,
-	.register_status_notify	= NULL,
+// NBXTODO:
+static struct embedded_sdio_data embedded_sdio_data0 = {
 	.cccr   = {
 		.sdio_vsn       = 2,
 		.multi_block    = 1,
@@ -89,25 +96,34 @@ static struct tegra_sdhci_platform_data tegra_sdhci_platform_data0 = {
 		.vendor         = 0x02d0,
 		.device         = 0x4329,
 	},
+};
+
+static struct tegra_sdhci_platform_data tegra_sdhci_platform_data0 = {
+	.mmc_data = {
+		.register_status_notify	= NULL,
+		.embedded_sdio = &embedded_sdio_data0,
+		.built_in = 1,
+	},
 	.cd_gpio = -1,
 	.wp_gpio = -1,
 	.power_gpio = -1,
+	.max_clk_limit = 26000000,
 };
 
 static struct tegra_sdhci_platform_data tegra_sdhci_platform_data2 = {
-	.clk_id = NULL,
-	.force_hs = 1,
 	.cd_gpio = TEGRA_GPIO_PI5,
 	.wp_gpio = TEGRA_GPIO_PI7,
-	.power_gpio = -1,
+	.power_gpio = TEGRA_GPIO_PD1,
 };
 
 static struct tegra_sdhci_platform_data tegra_sdhci_platform_data3 = {
-	.clk_id = NULL,
-	.force_hs = 0,
+	.is_8bit = 1,
 	.cd_gpio = -1,
 	.wp_gpio = -1,
 	.power_gpio = TEGRA_GPIO_PI6,
+	.mmc_data = {
+		.built_in = 1,
+	}
 };
 
 static struct platform_device tegra_sdhci_device0 = {
@@ -142,24 +158,16 @@ static struct platform_device tegra_sdhci_device3 = {
 
 int __init nbx03_sdhci_init(void)
 {
-	gpio_request(tegra_sdhci_platform_data2.power_gpio, "sdhci2_power");
-	gpio_request(tegra_sdhci_platform_data2.cd_gpio, "sdhci2_cd");
-	gpio_request(tegra_sdhci_platform_data2.wp_gpio, "sdhci2_wp");
-	gpio_request(tegra_sdhci_platform_data3.power_gpio, "sdhci3_power");
-
 	tegra_gpio_enable(tegra_sdhci_platform_data2.power_gpio);
 	tegra_gpio_enable(tegra_sdhci_platform_data2.cd_gpio);
 	tegra_gpio_enable(tegra_sdhci_platform_data2.wp_gpio);
 	tegra_gpio_enable(tegra_sdhci_platform_data3.power_gpio);
 
-	gpio_direction_output(tegra_sdhci_platform_data2.power_gpio, 1);
-	gpio_direction_output(tegra_sdhci_platform_data3.power_gpio, 1);
-	gpio_set_value(tegra_sdhci_platform_data3.power_gpio, 1);
-
 	platform_device_register(&tegra_sdhci_device3);
 	platform_device_register(&tegra_sdhci_device2);
 	platform_device_register(&tegra_sdhci_device0);
 
+	ar6000_pm_init();
 	wireless_power_control(WPC_MODULE_WIFI, 1/*on*/);
 	return 0;
 }

@@ -1,6 +1,6 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.
@@ -12,20 +12,18 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
-/*
-  NBX EC Battery
-*/
 
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/err.h>
-#include <linux/platform_device.h>
 #include <linux/debugfs.h>
 #include <linux/power_supply.h>
 #include <linux/wakelock.h>
 #include <linux/types.h>
 #include <linux/slab.h>
+#include <linux/suspend.h>
+#include <linux/wakelock.h>
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
@@ -106,21 +104,21 @@ struct nbx_ec_battery_dev_t {
 	uint32_t ACLineStatus;
 	uint32_t batt_status_poll_period;
 	int      batt_degrade;
+	int      batt_trickle_charge;
 	int      present;
 };
 
 static struct nbx_ec_battery_dev_t *batt_dev;
-static DECLARE_MUTEX(batt_dev_mutex);
+static DEFINE_SEMAPHORE(batt_dev_mutex);
 
-#define LOCKED_STATEMENT(mutex, statement)			\
-	do {							\
-		if(0 != down_interruptible(mutex)) break;	\
-		do {						\
-			statement;				\
-		} while(0);					\
-		up(mutex);					\
-	} while(0)
+#define LOCKED_STATEMENT(mutex, statement)	\
+	down(mutex);				\
+	do {					\
+		statement;			\
+	} while(0);				\
+	up(mutex);
 
+static void nbx_ec_battery_check_empty(void);
 
 static ssize_t nbx_ec_battery_show_property(
 	struct device *dev,
@@ -149,9 +147,11 @@ static ssize_t nbx_ec_battery_store_property(
 		);
 
 	if(0 < value) {
-		cancel_delayed_work(&nbx_ec_battery_poll_work);
-		queue_delayed_work(nbx_ec_battery_poll_workqueue, &nbx_ec_battery_poll_work,
-				msecs_to_jiffies(value));
+		if(nbx_ec_battery_poll_workqueue != NULL) {
+			cancel_delayed_work(&nbx_ec_battery_poll_work);
+			queue_delayed_work(nbx_ec_battery_poll_workqueue, &nbx_ec_battery_poll_work,
+					msecs_to_jiffies(value));
+		}
 	}
 
 	return count;
@@ -197,6 +197,31 @@ static struct device_attribute nbx_ec_battery_degradation_attr = {
 	.store = NULL,
 };
 
+static ssize_t nbx_ec_battery_show_trickle_charge(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	ssize_t ret;
+	int batt_trickle_charge = 0;
+
+	LOCKED_STATEMENT(&batt_dev_mutex,
+			batt_trickle_charge = batt_dev->batt_trickle_charge;
+		);
+
+	if(batt_trickle_charge) {
+		ret = snprintf(buf, PAGE_SIZE, "1");
+	}
+	else {
+		ret = snprintf(buf, PAGE_SIZE, "0");
+	}
+
+	return ret;
+}
+
+static struct device_attribute nbx_ec_battery_trickle_charge_attr = {
+	.attr = { .name = "trickle_charge", .mode = S_IRUGO },
+	.show = nbx_ec_battery_show_trickle_charge,
+	.store = NULL,
+};
+
 static void nbx_ec_acplug_changed(void)
 {
 	int i;
@@ -217,6 +242,8 @@ static void nbx_ec_acplug_changed(void)
 			}
 		}
 	}
+
+	nbx_ec_battery_check_empty();
 }
 
 static int nbx_ec_battery_info(void)
@@ -263,16 +290,16 @@ static int nbx_ec_battery_info(void)
 		BATTERY_INFO_RES_STATUS_HEALTH_MASK     = 0x0F,
 	};
 	enum {
-		BATTERY_INFO_RES_EXT_STATUS_CHARGE_FAULT = 0x01,
+		BATTERY_INFO_RES_EXT_STATUS_CHARGE_FAULT   = 0x01,
+		BATTERY_INFO_RES_EXT_STATUS_TRICKLE_CHARGE = 0x02,
 	};
 
 	if(batt_dev == NULL) return -EFAULT;
 
-	ret = ec_ipc_send_request_timeout(EC_IPC_PID_BATTERY,
-					EC_IPC_CID_BATTERY_INFO_REQUEST,
-					NULL, 0,
-					res_buf, sizeof(res_buf),
-					1000);
+	ret = ec_ipc_send_request(EC_IPC_PID_BATTERY,
+				EC_IPC_CID_BATTERY_INFO_REQUEST,
+				NULL, 0,
+				res_buf, sizeof(res_buf));
 	if(ret < (int)sizeof(res_buf)){
 		pr_err("nbx_ec_battery:battery_info:ec_ipc_send_request failed. %d(%d)\n", ret, (int)sizeof(res_buf));
 		return -EIO;
@@ -339,6 +366,13 @@ static int nbx_ec_battery_info(void)
 			default:
 				batt_dev->batt_health = POWER_SUPPLY_HEALTH_UNKNOWN;
 				break;
+			}
+
+			if((res_buf[BATTERY_INFO_RES_EXT_STATUS] & BATTERY_INFO_RES_EXT_STATUS_TRICKLE_CHARGE) != 0) {
+				batt_dev->batt_trickle_charge = 1;
+			}
+			else {
+				batt_dev->batt_trickle_charge = 0;
 			}
 
 			/* ignore BATTERY_INFO_RES_REMAIN_L */
@@ -505,8 +539,28 @@ static void nbx_ec_battery_receive_event(const uint8_t* buf, int size)
 	queue_delayed_work(nbx_ec_battery_poll_workqueue, &nbx_ec_battery_poll_work, 0);
 }
 
-#define FAIL_RETRY_LIMIT 3
-static int fail_retry_count = FAIL_RETRY_LIMIT;
+static struct wake_lock nbx_ec_battery_wake_lock;
+
+static struct wake_lock nbx_ec_battery_empty_shutdown_wake_lock;
+
+static void nbx_ec_battery_check_empty(void)
+{
+	int empty = 0;
+
+	/* Shutdown when AC unplugged & Battery is empty. */
+	LOCKED_STATEMENT(&batt_dev_mutex,
+			if( (batt_dev->ACLineStatus == 0) && ((batt_dev->present) && (batt_dev->BatteryLifePercent <= 0)) ){
+				empty = 1;
+			}
+		);
+
+	if(empty) {
+		wake_lock(&nbx_ec_battery_empty_shutdown_wake_lock);
+	}
+	else {
+		wake_unlock(&nbx_ec_battery_empty_shutdown_wake_lock);
+	}
+}
 
 static void nbx_ec_battery_poll_func(struct work_struct* work)
 {
@@ -515,11 +569,14 @@ static void nbx_ec_battery_poll_func(struct work_struct* work)
 	uint32_t poll_period = INITIAL_POLLING_INTERVAL;
 
 	result = nbx_ec_battery_info();
-
-	for (i = 0; i < ARRAY_SIZE(nbx_ec_supplies); i++) {
-		if(0 == strcmp(nbx_ec_supplies[i].name, "battery") ){
-			power_supply_changed(&nbx_ec_supplies[i]);
+	if(0 <= result) {
+		for (i = 0; i < ARRAY_SIZE(nbx_ec_supplies); i++) {
+			if(0 == strcmp(nbx_ec_supplies[i].name, "battery") ){
+				power_supply_changed(&nbx_ec_supplies[i]);
+			}
 		}
+
+		nbx_ec_battery_check_empty();
 	}
 
 	nbx_ec_ipc_acplug_request_update();
@@ -529,58 +586,42 @@ static void nbx_ec_battery_poll_func(struct work_struct* work)
 			poll_period = batt_dev->batt_status_poll_period;
 		);
 
-	if((poll_period == 0) && (result != 0) && (0 < fail_retry_count)) {
-		fail_retry_count--;
-		poll_period = 1000; /* error retry */
-	}
-	else {
-		fail_retry_count = FAIL_RETRY_LIMIT;
-	}
-
 	if(0 < poll_period) {
 		queue_delayed_work(nbx_ec_battery_poll_workqueue, &nbx_ec_battery_poll_work,
 				msecs_to_jiffies(poll_period));
 	}
+
+	wake_unlock(&nbx_ec_battery_wake_lock);
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void nbx_ec_battery_pre_earlysuspend(struct early_suspend *h)
-{
-	return;
-}
-static void nbx_ec_battery_post_earlysuspend(struct early_suspend *h)
-{
-	queue_delayed_work(nbx_ec_battery_poll_workqueue, &nbx_ec_battery_poll_work, 0);
-}
-static struct early_suspend nbx_ec_battery_earlysuspend =
-{
-	.suspend = nbx_ec_battery_pre_earlysuspend,
-	.resume = nbx_ec_battery_post_earlysuspend,
-	.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN - 1,
-};
-#endif
+#ifdef CONFIG_SUSPEND
 
-#ifdef CONFIG_PM
-static int nbx_ec_battery_suspend(struct platform_device *dev,
-				pm_message_t state)
+static int nbx_ec_battery_suspend(struct nbx_ec_ipc_device *edev)
 {
-	/* stop battery polling timer */
-	cancel_delayed_work(&nbx_ec_battery_poll_work);
+	cancel_delayed_work_sync(&nbx_ec_battery_poll_work);
+
+	return 0;
+}
+static int nbx_ec_battery_resume(struct nbx_ec_ipc_device *edev)
+{
+	if(nbx_ec_battery_poll_workqueue != NULL) {
+		wake_lock_timeout(&nbx_ec_battery_wake_lock, 10 * HZ);
+		queue_delayed_work(nbx_ec_battery_poll_workqueue, &nbx_ec_battery_poll_work, 0);
+	}
 
 	return 0;
 }
 
-static int nbx_ec_battery_resume(struct platform_device *dev)
-{
-	return 0;
-}
-#endif
+#else /* !CONFIG_SUSPEND */
+#define nbx_ec_battery_suspend NULL
+#define nbx_ec_battery_resume NULL
+#endif /* CONFIG_SUSPEND */
 
-static int nbx_ec_battery_probe(struct platform_device *pdev)
+static int nbx_ec_battery_probe(struct nbx_ec_ipc_device *edev)
 {
 	int i, rc = 0;
 	struct nbx_ec_battery_platform_data* batt_pdata =
-		(struct nbx_ec_battery_platform_data*)(pdev->dev.platform_data);
+		(struct nbx_ec_battery_platform_data*)(edev->dev.platform_data);
 
 	nbx_ec_battery_poll_workqueue = NULL;
 
@@ -602,18 +643,19 @@ static int nbx_ec_battery_probe(struct platform_device *pdev)
 			batt_dev->batt_health = POWER_SUPPLY_HEALTH_UNKNOWN;
 			batt_dev->batt_status_poll_period = INITIAL_POLLING_INTERVAL;
 			batt_dev->batt_degrade = BATTERY_DEGRADATION_UNKNOWN;
+			batt_dev->batt_trickle_charge = 0;
 		);
 
 	if(rc) goto error_exit;
 
 	for (i = 0; i < ARRAY_SIZE(nbx_ec_supplies); i++) {
-		rc = power_supply_register(&pdev->dev, &nbx_ec_supplies[i]);
+		rc = power_supply_register(&edev->dev, &nbx_ec_supplies[i]);
 		if (rc) {
 			pr_err("Failed to register power supply\n");
 			goto error_exit;
 		}
 	}
-	pr_info("%s: battery driver registered\n", pdev->name);
+	pr_info("%s: battery driver registered\n", edev->name);
 
 	nbx_ec_battery_poll_workqueue = create_singlethread_workqueue("nbx_ec_battery_poll_workqueue");
 	if(nbx_ec_battery_poll_workqueue == NULL) {
@@ -622,14 +664,22 @@ static int nbx_ec_battery_probe(struct platform_device *pdev)
 		goto error_exit;
 	}
 
-	rc = device_create_file(&pdev->dev, &nbx_ec_battery_attr);
+	rc = device_create_file(&edev->dev, &nbx_ec_battery_attr);
 	if (rc) {
 		pr_err("nbx_ec_battery_probe:device_create_file FAILED\n");
 		goto error_exit;
 	}
 
 	if(batt_pdata->degradation) {
-		rc = device_create_file(&pdev->dev, &nbx_ec_battery_degradation_attr);
+		rc = device_create_file(&edev->dev, &nbx_ec_battery_degradation_attr);
+		if (rc) {
+			pr_err("nbx_ec_battery_probe:device_create_file FAILED\n");
+			goto error_exit;
+		}
+	}
+
+	if(batt_pdata->trickle_charge) {
+		rc = device_create_file(&edev->dev, &nbx_ec_battery_trickle_charge_attr);
 		if (rc) {
 			pr_err("nbx_ec_battery_probe:device_create_file FAILED\n");
 			goto error_exit;
@@ -638,15 +688,14 @@ static int nbx_ec_battery_probe(struct platform_device *pdev)
 
 	INIT_DELAYED_WORK(&nbx_ec_battery_poll_work, nbx_ec_battery_poll_func);
 
+	wake_lock_init(&nbx_ec_battery_wake_lock, WAKE_LOCK_SUSPEND, "nbx_ec_battery");
+	wake_lock_init(&nbx_ec_battery_empty_shutdown_wake_lock, WAKE_LOCK_SUSPEND, "nbx_ec_battery_empty_shutdown");
+
 	/* Initial read */
 	queue_delayed_work(nbx_ec_battery_poll_workqueue, &nbx_ec_battery_poll_work, 0);
 
 	ec_ipc_register_recv_event(EC_IPC_CID_BATTERY_INFO_EVENT, nbx_ec_battery_receive_event);
 	nbx_ec_ipc_acplug_register_callback(nbx_ec_acplug_changed);
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	register_early_suspend(&nbx_ec_battery_earlysuspend);
-#endif
 
 	nbx_ec_acplug_changed(); /* initialize */
 
@@ -656,10 +705,9 @@ error_exit:
 	ec_ipc_unregister_recv_event(EC_IPC_CID_BATTERY_INFO_EVENT);
 	nbx_ec_ipc_acplug_unregister_callback(nbx_ec_acplug_changed);
 
-	cancel_delayed_work(&nbx_ec_battery_poll_work);
-	flush_workqueue(nbx_ec_battery_poll_workqueue);
-	cancel_delayed_work(&nbx_ec_battery_poll_work);
-	destroy_workqueue(nbx_ec_battery_poll_workqueue);
+	if(nbx_ec_battery_poll_workqueue != NULL) {
+		destroy_workqueue(nbx_ec_battery_poll_workqueue);
+	}
 	nbx_ec_battery_poll_workqueue = NULL;
 
 	for (i = 0; i < ARRAY_SIZE(nbx_ec_supplies); i++) {
@@ -674,23 +722,20 @@ error_exit:
 	return rc;
 }
 
-static int nbx_ec_battery_remove(struct platform_device *pdev)
+static int nbx_ec_battery_remove(struct nbx_ec_ipc_device *edev)
 {
 	int i;
 	struct nbx_ec_battery_platform_data* batt_pdata =
-		(struct nbx_ec_battery_platform_data*)(pdev->dev.platform_data);
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&nbx_ec_battery_earlysuspend);
-#endif
+		(struct nbx_ec_battery_platform_data*)(edev->dev.platform_data);
 
 	ec_ipc_unregister_recv_event(EC_IPC_CID_BATTERY_INFO_EVENT);
 	nbx_ec_ipc_acplug_unregister_callback(nbx_ec_acplug_changed);
 
-	cancel_delayed_work(&nbx_ec_battery_poll_work);
-	flush_workqueue(nbx_ec_battery_poll_workqueue);
-	cancel_delayed_work(&nbx_ec_battery_poll_work);
-	destroy_workqueue(nbx_ec_battery_poll_workqueue);
+	if(nbx_ec_battery_poll_workqueue != NULL) {
+		cancel_delayed_work_sync(&nbx_ec_battery_poll_work);
+		flush_workqueue(nbx_ec_battery_poll_workqueue);
+		destroy_workqueue(nbx_ec_battery_poll_workqueue);
+	}
 	nbx_ec_battery_poll_workqueue = NULL;
 
 	for (i = 0; i < ARRAY_SIZE(nbx_ec_supplies); i++) {
@@ -698,10 +743,10 @@ static int nbx_ec_battery_remove(struct platform_device *pdev)
 	}
 
 	if (batt_dev) {
-		device_remove_file(&pdev->dev, &nbx_ec_battery_attr);
+		device_remove_file(&edev->dev, &nbx_ec_battery_attr);
 
 		if(batt_pdata->degradation) {
-			device_remove_file(&pdev->dev, &nbx_ec_battery_degradation_attr);
+			device_remove_file(&edev->dev, &nbx_ec_battery_degradation_attr);
 		}
 
 		LOCKED_STATEMENT(&batt_dev_mutex,
@@ -710,33 +755,39 @@ static int nbx_ec_battery_remove(struct platform_device *pdev)
 			);
 	}
 
+	wake_lock_destroy(&nbx_ec_battery_wake_lock);
+	wake_lock_destroy(&nbx_ec_battery_empty_shutdown_wake_lock);
+
 	return 0;
 }
 
-static struct platform_driver nbx_ec_battery_driver =
+static struct nbx_ec_ipc_driver nbx_ec_battery_driver =
 {
-	.probe    = nbx_ec_battery_probe,
-	.remove   = nbx_ec_battery_remove,
-#ifdef CONFIG_PM
-	.suspend  = nbx_ec_battery_suspend,
-	.resume   = nbx_ec_battery_resume,
-#endif
-	.driver   = {
-		.name     = "nbx_ec_battery",
-		.owner    = THIS_MODULE,
+	.probe   = nbx_ec_battery_probe,
+	.remove  = nbx_ec_battery_remove,
+	.suspend = nbx_ec_battery_suspend,
+	.resume  = nbx_ec_battery_resume,
+	.drv     = {
+		.name     = "nbx_battery",
 	},
 };
 
 static int __init nbx_ec_battery_init(void)
 {
-	platform_driver_register(&nbx_ec_battery_driver);
+	int ret;
+
+	ret = nbx_ec_ipc_driver_register(&nbx_ec_battery_driver);
+	if (ret < 0) {
+		pr_err("%s:nbx_ec_ipc_driver_register() failed, %d\n", __func__, ret);
+		return ret;
+	}
 
 	return 0;
 }
 
 static void __exit nbx_ec_battery_exit(void)
 {
-	platform_driver_unregister(&nbx_ec_battery_driver);
+	nbx_ec_ipc_driver_unregister(&nbx_ec_battery_driver);
 }
 
 module_init(nbx_ec_battery_init);

@@ -3,7 +3,7 @@
  *
  * GPU memory management driver for Tegra
  *
- * Copyright (c) 2010, NVIDIA Corporation.
+ * Copyright (c) 2010-2012, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,12 +24,13 @@
 #define __VIDEO_TEGRA_NVMAP_NVMAP_H
 
 #include <linux/list.h>
+#include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/rbtree.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
 
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 
 #include <mach/nvmap.h>
 
@@ -61,6 +62,7 @@ struct nvmap_pgalloc {
 	struct list_head mru_list;	/* MRU entry for IOVMM reclamation */
 	bool contig;			/* contiguous system memory */
 	bool dirty;			/* area is invalid and needs mapping */
+	u32 iovm_addr;	/* is non-zero, if client need specific iova mapping */
 };
 
 struct nvmap_handle {
@@ -71,6 +73,7 @@ struct nvmap_handle {
 	unsigned long flags;
 	size_t size;		/* padded (as-allocated) size */
 	size_t orig_size;	/* original (as-requested) size */
+	size_t align;
 	struct nvmap_client *owner;
 	struct nvmap_device *dev;
 	union {
@@ -81,15 +84,42 @@ struct nvmap_handle {
 	bool secure;		/* zap IOVMM area on unpin */
 	bool heap_pgalloc;	/* handle is page allocated (sysmem / iovmm) */
 	bool alloc;		/* handle has memory allocated */
+	unsigned int userflags;	/* flags passed from userspace */
 	struct mutex lock;
 };
+
+#define NVMAP_DEFAULT_PAGE_POOL_SIZE 8192
+#define NVMAP_NUM_POOLS 2
+#define NVMAP_UC_POOL 0
+#define NVMAP_WC_POOL 1
+
+struct nvmap_page_pool {
+	spinlock_t lock;
+	int npages;
+	struct page **page_array;
+	struct mutex shrink_lock;
+	struct page **shrink_array;
+	int max_pages;
+};
+
+int nvmap_page_pool_init(struct nvmap_page_pool *pool, int flags);
+struct page *nvmap_page_pool_alloc(struct nvmap_page_pool *pool);
+bool nvmap_page_pool_release(struct nvmap_page_pool *pool, struct page *page);
+int nvmap_page_pool_get_free_count(struct nvmap_page_pool *pool);
 
 struct nvmap_share {
 	struct tegra_iovmm_client *iovmm;
 	wait_queue_head_t pin_wait;
 	struct mutex pin_lock;
+	union {
+		struct nvmap_page_pool pools[NVMAP_NUM_POOLS];
+		struct {
+			struct nvmap_page_pool uc_pool;
+			struct nvmap_page_pool wc_pool;
+		};
+	};
 #ifdef CONFIG_NVMAP_RECLAIM_UNPINNED_VM
-	spinlock_t mru_lock;
+	struct mutex mru_lock;
 	struct list_head *mru_lists;
 	int nr_mru;
 #endif
@@ -111,18 +141,8 @@ struct nvmap_client {
 	bool				super;
 	atomic_t			count;
 	struct task_struct		*task;
+	struct list_head		list;
 	struct nvmap_carveout_commit	carveout_commit[0];
-};
-
-/* handle_ref objects are client-local references to an nvmap_handle;
- * they are distinct objects so that handles can be unpinned and
- * unreferenced the correct number of times when a client abnormally
- * terminates */
-struct nvmap_handle_ref {
-	struct nvmap_handle *handle;
-	struct rb_node	node;
-	atomic_t	dupes;	/* number of times to free on file close */
-	atomic_t	pin;	/* number of times to unpin on free */
 };
 
 struct nvmap_vma_priv {
@@ -153,10 +173,8 @@ void nvmap_usecount_inc(struct nvmap_handle *h);
 void nvmap_usecount_dec(struct nvmap_handle *h);
 
 struct nvmap_heap_block *nvmap_carveout_alloc(struct nvmap_client *dev,
-					      size_t len, size_t align,
-					      unsigned long usage,
-					      unsigned int prot,
-					      struct nvmap_handle *handle);
+					      struct nvmap_handle *handle,
+					      unsigned long type);
 
 unsigned long nvmap_carveout_usage(struct nvmap_client *c,
 				   struct nvmap_heap_block *b);
@@ -230,7 +248,7 @@ static inline void nvmap_handle_put(struct nvmap_handle *h)
 static inline pgprot_t nvmap_pgprot(struct nvmap_handle *h, pgprot_t prot)
 {
 	if (h->flags == NVMAP_HANDLE_UNCACHEABLE)
-		return pgprot_dmacoherent(prot);
+		return pgprot_noncached(prot);
 	else if (h->flags == NVMAP_HANDLE_WRITE_COMBINE)
 		return pgprot_writecombine(prot);
 	else if (h->flags == NVMAP_HANDLE_INNER_CACHEABLE)
@@ -239,5 +257,10 @@ static inline pgprot_t nvmap_pgprot(struct nvmap_handle *h, pgprot_t prot)
 }
 
 int is_nvmap_vma(struct vm_area_struct *vma);
+
+struct nvmap_handle_ref *nvmap_alloc_iovm(struct nvmap_client *client,
+	size_t size, size_t align, unsigned int flags, unsigned int iova_start);
+
+void nvmap_free_iovm(struct nvmap_client *client, struct nvmap_handle_ref *r);
 
 #endif

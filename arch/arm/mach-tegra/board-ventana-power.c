@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 NVIDIA, Inc.
+ * Copyright (C) 2010-2011 NVIDIA, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -22,8 +22,8 @@
 #include <linux/regulator/machine.h>
 #include <linux/mfd/tps6586x.h>
 #include <linux/gpio.h>
-#include <mach/suspend.h>
 #include <linux/io.h>
+#include <linux/power/gpio-charger.h>
 
 #include <mach/iomap.h>
 #include <mach/irqs.h>
@@ -32,7 +32,7 @@
 
 #include "gpio-names.h"
 #include "fuse.h"
-#include "power.h"
+#include "pm.h"
 #include "wakeups-t2.h"
 #include "board.h"
 #include "board-ventana.h"
@@ -89,6 +89,10 @@ static struct regulator_consumer_supply tps658621_ldo5_supply[] = {
 static struct regulator_consumer_supply tps658621_ldo6_supply[] = {
 	REGULATOR_SUPPLY("vdd_ldo6", NULL),
 	REGULATOR_SUPPLY("vcsi", "tegra_camera"),
+	REGULATOR_SUPPLY("vdd_dmic", "tegra-snd-wm8903"),
+	REGULATOR_SUPPLY("vdd_i2c", "3-0030"),
+	REGULATOR_SUPPLY("vdd_i2c", "6-0072"),
+	REGULATOR_SUPPLY("vdd_i2c", "7-0072"),
 };
 static struct regulator_consumer_supply tps658621_ldo7_supply[] = {
 	REGULATOR_SUPPLY("vdd_ldo7", NULL),
@@ -103,15 +107,21 @@ static struct regulator_consumer_supply tps658621_ldo9_supply[] = {
 	REGULATOR_SUPPLY("vdd_ldo9", NULL),
 	REGULATOR_SUPPLY("avdd_2v85", NULL),
 	REGULATOR_SUPPLY("vdd_ddr_rx", NULL),
-	REGULATOR_SUPPLY("avdd_amp", NULL),
+	REGULATOR_SUPPLY("vdd_spk_amp", "tegra-snd-wm8903"),
 };
 
-/*
- * Current TPS6586x is known for having a voltage glitch if current load changes
- * from low to high in auto PWM/PFM mode for CPU's Vdd line.
- */
+static struct tps6586x_settings sm0_config = {
+	.sm_pwm_mode = PWM_DEFAULT_VALUE,
+	.slew_rate = SLEW_RATE_3520UV_PER_SEC,
+};
+
 static struct tps6586x_settings sm1_config = {
+	/*
+	 * Current TPS6586x is known for having a voltage glitch if current load
+	 * changes from low to high in auto PWM/PFM mode for CPU's Vdd line.
+	 */
 	.sm_pwm_mode = PWM_ONLY,
+	.slew_rate = SLEW_RATE_3520UV_PER_SEC,
 };
 
 #define REGULATOR_INIT(_id, _minmv, _maxmv, on, config)			\
@@ -125,6 +135,7 @@ static struct tps6586x_settings sm1_config = {
 					   REGULATOR_CHANGE_STATUS |	\
 					   REGULATOR_CHANGE_VOLTAGE),	\
 			.always_on = on,				\
+			.apply_uV = 1,					\
 		},							\
 		.num_consumer_supplies = ARRAY_SIZE(tps658621_##_id##_supply),\
 		.consumer_supplies = tps658621_##_id##_supply,		\
@@ -134,19 +145,19 @@ static struct tps6586x_settings sm1_config = {
 #define ON	1
 #define OFF	0
 
-static struct regulator_init_data sm0_data = REGULATOR_INIT(sm0, 725, 1500, ON, NULL);
+static struct regulator_init_data sm0_data = REGULATOR_INIT(sm0, 725, 1500, ON, &sm0_config);
 static struct regulator_init_data sm1_data = REGULATOR_INIT(sm1, 725, 1500, ON, &sm1_config);
 static struct regulator_init_data sm2_data = REGULATOR_INIT(sm2, 3000, 4550, ON, NULL);
 static struct regulator_init_data ldo0_data = REGULATOR_INIT(ldo0, 1250, 3300, OFF, NULL);
 static struct regulator_init_data ldo1_data = REGULATOR_INIT(ldo1, 725, 1500, ON, NULL);
 static struct regulator_init_data ldo2_data = REGULATOR_INIT(ldo2, 725, 1500, OFF, NULL);
 static struct regulator_init_data ldo3_data = REGULATOR_INIT(ldo3, 1250, 3300, OFF, NULL);
-static struct regulator_init_data ldo4_data = REGULATOR_INIT(ldo4, 1700, 2475, OFF, NULL);
+static struct regulator_init_data ldo4_data = REGULATOR_INIT(ldo4, 1700, 2475, ON, NULL);
 static struct regulator_init_data ldo5_data = REGULATOR_INIT(ldo5, 1250, 3300, ON, NULL);
-static struct regulator_init_data ldo6_data = REGULATOR_INIT(ldo6, 1250, 1800, OFF, NULL);
+static struct regulator_init_data ldo6_data = REGULATOR_INIT(ldo6, 1800, 1800, OFF, NULL);
 static struct regulator_init_data ldo7_data = REGULATOR_INIT(ldo7, 1250, 3300, OFF, NULL);
 static struct regulator_init_data ldo8_data = REGULATOR_INIT(ldo8, 1250, 3300, OFF, NULL);
-static struct regulator_init_data ldo9_data = REGULATOR_INIT(ldo9, 1250, 3300, OFF, NULL);
+static struct regulator_init_data ldo9_data = REGULATOR_INIT(ldo9, 1250, 3300, ON, NULL);
 
 static struct tps6586x_rtc_platform_data rtc_data = {
 	.irq = TEGRA_NR_IRQS + TPS6586X_INT_RTC_ALM1,
@@ -201,6 +212,18 @@ static struct i2c_board_info __initdata ventana_regulators[] = {
 	},
 };
 
+static void ventana_board_suspend(int lp_state, enum suspend_stage stg)
+{
+	if ((lp_state == TEGRA_SUSPEND_LP1) && (stg == TEGRA_SUSPEND_BEFORE_CPU))
+		tegra_console_uart_suspend();
+}
+
+static void ventana_board_resume(int lp_state, enum resume_stage stg)
+{
+	if ((lp_state == TEGRA_SUSPEND_LP1) && (stg == TEGRA_RESUME_AFTER_CPU))
+		tegra_console_uart_resume();
+}
+
 static struct tegra_suspend_platform_data ventana_suspend_data = {
 	/*
 	 * Check power on time and crystal oscillator start time
@@ -211,13 +234,10 @@ static struct tegra_suspend_platform_data ventana_suspend_data = {
 	.suspend_mode	= TEGRA_SUSPEND_LP0,
 	.core_timer	= 0x7e7e,
 	.core_off_timer = 0xf,
-	.separate_req	= true,
 	.corereq_high	= false,
 	.sysclkreq_high	= true,
-	.wake_enb	= TEGRA_WAKE_GPIO_PV2 | TEGRA_WAKE_GPIO_PY6,
-	.wake_high	= 0,
-	.wake_low	= TEGRA_WAKE_GPIO_PV2 | TEGRA_WAKE_GPIO_PY6,
-	.wake_any	= 0,
+	.board_suspend = ventana_board_suspend,
+	.board_resume = ventana_board_resume,
 };
 
 int __init ventana_regulator_init(void)
@@ -239,10 +259,37 @@ int __init ventana_regulator_init(void)
 
 	i2c_register_board_info(4, ventana_regulators, 1);
 
-	regulator_has_full_constraints();
+//	regulator_has_full_constraints();
 
 	tegra_init_suspend(&ventana_suspend_data);
 
+	return 0;
+}
+
+static char *ventana_battery[] = {
+	"battery",
+};
+
+static struct gpio_charger_platform_data ventana_charger_pdata = {
+	.name = "ac",
+	.type = POWER_SUPPLY_TYPE_MAINS,
+	.gpio = AC_PRESENT_GPIO,
+	.gpio_active_low = 1,
+	.supplied_to = ventana_battery,
+	.num_supplicants = ARRAY_SIZE(ventana_battery),
+};
+
+static struct platform_device ventana_charger_device = {
+	.name = "gpio-charger",
+	.dev = {
+		.platform_data = &ventana_charger_pdata,
+	},
+};
+
+int __init ventana_charger_init(void)
+{
+	tegra_gpio_enable(AC_PRESENT_GPIO);
+	platform_device_register(&ventana_charger_device);
 	return 0;
 }
 

@@ -56,7 +56,6 @@
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
-#include <media/v4l2-i2c-drv.h>
 #include <media/msp3400.h>
 #include <media/tvaudio.h>
 #include "msp3400-driver.h"
@@ -70,7 +69,7 @@ MODULE_LICENSE("GPL");
 /* module parameters */
 static int opmode   = OPMODE_AUTO;
 int msp_debug;		 /* msp_debug output */
-int msp_once;		 /* no continous stereo monitoring */
+int msp_once;		 /* no continuous stereo monitoring */
 int msp_amsound;	 /* hard-wire AM sound at 6.5 Hz (france),
 			    the autoscan seems work well only with FM... */
 int msp_standard = 1;    /* Override auto detect of audio msp_standard,
@@ -552,7 +551,7 @@ static int msp_log_status(struct v4l2_subdev *sd)
 	switch (state->mode) {
 		case MSP_MODE_AM_DETECT: p = "AM (for carrier detect)"; break;
 		case MSP_MODE_FM_RADIO: p = "FM Radio"; break;
-		case MSP_MODE_FM_TERRA: p = "Terrestial FM-mono/stereo"; break;
+		case MSP_MODE_FM_TERRA: p = "Terrestrial FM-mono/stereo"; break;
 		case MSP_MODE_FM_SAT: p = "Satellite FM-mono"; break;
 		case MSP_MODE_FM_NICAM1: p = "NICAM/FM (B/G, D/K)"; break;
 		case MSP_MODE_FM_NICAM2: p = "NICAM/FM (I)"; break;
@@ -848,14 +847,30 @@ static const struct i2c_device_id msp_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, msp_id);
 
-static struct v4l2_i2c_driver_data v4l2_i2c_data = {
-	.name = "msp3400",
-	.probe = msp_probe,
-	.remove = msp_remove,
-	.suspend = msp_suspend,
-	.resume = msp_resume,
-	.id_table = msp_id,
+static struct i2c_driver msp_driver = {
+	.driver = {
+		.owner	= THIS_MODULE,
+		.name	= "msp3400",
+	},
+	.probe		= msp_probe,
+	.remove		= msp_remove,
+	.suspend	= msp_suspend,
+	.resume		= msp_resume,
+	.id_table	= msp_id,
 };
+
+static __init int init_msp(void)
+{
+	return i2c_add_driver(&msp_driver);
+}
+
+static __exit void exit_msp(void)
+{
+	i2c_del_driver(&msp_driver);
+}
+
+module_init(init_msp);
+module_exit(exit_msp);
 
 /*
  * Overrides for Emacs so that we follow Linus's tabbing style.

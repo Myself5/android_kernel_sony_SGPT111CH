@@ -1,4 +1,3 @@
-# 2011-06-10: File changed by Sony Corporation
 #
 # Makefile for native language support
 #

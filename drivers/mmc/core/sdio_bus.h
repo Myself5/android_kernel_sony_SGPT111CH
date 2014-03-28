@@ -18,5 +18,13 @@ void sdio_remove_func(struct sdio_func *func);
 int sdio_register_bus(void);
 void sdio_unregister_bus(void);
 
+static DEFINE_MUTEX(static_loaded_lock);
+void set_static_loaded(int value);
+int get_static_loaded(void);
+
+void mmc_dettach_sdio(void);
+void mmc_fake_attach_sdio(void);
+void mmc_fake_rescan(struct mmc_host *host);
+
 #endif
 

@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * tc35892.c - tc35892 ioexpander driver
  *
@@ -29,8 +29,9 @@
 #include <mach/gpio.h>
 #include <linux/err.h>
 #include <../gpio-names.h>
-#include <mach/tegra2_fuse.h>
+#include <mach/tegra_odm_fuses.h>
 #include <media/tegra_camera.h>
+
 
 struct tc35892_info {
     struct i2c_client *i2c_client;
@@ -215,6 +216,11 @@ static int tc35892_io_init(struct i2c_client *client)
 
 static long tc35892_powerOnCamera(__u32 cameraIndex, struct tc35892_info *info)
 {
+    int status = tc35892_io_init(info->i2c_client);
+    if(status)
+    {
+        return -EINVAL;
+    }
 
     tc35892_write16(info->i2c_client, REG_GPIODATA1, 0x0808); // set CAM_RST_VGA to high
     tc35892_write16(info->i2c_client, REG_GPIODATA2, 0x0101); // set 1.8V_CAM_VGA_EN to high

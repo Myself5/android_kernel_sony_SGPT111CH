@@ -18,10 +18,12 @@
 /* Supports:
  * Moorestown platform Langwell chip.
  * Medfield platform Penwell chip.
+ * Whitney point.
  */
 
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/platform_device.h>
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/stddef.h>
@@ -132,10 +134,10 @@ static int lnw_gpio_to_irq(struct gpio_chip *chip, unsigned offset)
 	return lnw->irq_base + offset;
 }
 
-static int lnw_irq_type(unsigned irq, unsigned type)
+static int lnw_irq_type(struct irq_data *d, unsigned type)
 {
-	struct lnw_gpio *lnw = get_irq_chip_data(irq);
-	u32 gpio = irq - lnw->irq_base;
+	struct lnw_gpio *lnw = irq_data_get_irq_chip_data(d);
+	u32 gpio = d->irq - lnw->irq_base;
 	unsigned long flags;
 	u32 value;
 	void __iomem *grer = gpio_reg(&lnw->chip, gpio, GRER);
@@ -158,21 +160,21 @@ static int lnw_irq_type(unsigned irq, unsigned type)
 	spin_unlock_irqrestore(&lnw->lock, flags);
 
 	return 0;
-};
+}
 
-static void lnw_irq_unmask(unsigned irq)
+static void lnw_irq_unmask(struct irq_data *d)
 {
-};
+}
 
-static void lnw_irq_mask(unsigned irq)
+static void lnw_irq_mask(struct irq_data *d)
 {
-};
+}
 
 static struct irq_chip lnw_irqchip = {
 	.name		= "LNW-GPIO",
-	.mask		= lnw_irq_mask,
-	.unmask		= lnw_irq_unmask,
-	.set_type	= lnw_irq_type,
+	.irq_mask	= lnw_irq_mask,
+	.irq_unmask	= lnw_irq_unmask,
+	.irq_set_type	= lnw_irq_type,
 };
 
 static DEFINE_PCI_DEVICE_TABLE(lnw_gpio_ids) = {   /* pin number */
@@ -185,26 +187,28 @@ MODULE_DEVICE_TABLE(pci, lnw_gpio_ids);
 
 static void lnw_irq_handler(unsigned irq, struct irq_desc *desc)
 {
-	struct lnw_gpio *lnw = (struct lnw_gpio *)get_irq_data(irq);
-	u32 base, gpio;
+	struct irq_data *data = irq_desc_get_irq_data(desc);
+	struct lnw_gpio *lnw = irq_data_get_irq_handler_data(data);
+	struct irq_chip *chip = irq_data_get_irq_chip(data);
+	u32 base, gpio, mask;
+	unsigned long pending;
 	void __iomem *gedr;
-	u32 gedr_v;
 
 	/* check GPIO controller to check which pin triggered the interrupt */
 	for (base = 0; base < lnw->chip.ngpio; base += 32) {
 		gedr = gpio_reg(&lnw->chip, base, GEDR);
-		gedr_v = readl(gedr);
-		if (!gedr_v)
-			continue;
-		for (gpio = base; gpio < base + 32; gpio++)
-			if (gedr_v & BIT(gpio % 32)) {
-				pr_debug("pin %d triggered\n", gpio);
-				generic_handle_irq(lnw->irq_base + gpio);
-			}
-		/* clear the edge detect status bit */
-		writel(gedr_v, gedr);
+		pending = readl(gedr);
+		while (pending) {
+			gpio = __ffs(pending) - 1;
+			mask = BIT(gpio);
+			pending &= ~mask;
+			/* Clear before handling so we can't lose an edge */
+			writel(mask, gedr);
+			generic_handle_irq(lnw->irq_base + base + gpio);
+		}
 	}
-	desc->chip->eoi(irq);
+
+	chip->irq_eoi(data);
 }
 
 static int __devinit lnw_gpio_probe(struct pci_dev *pdev,
@@ -272,12 +276,12 @@ static int __devinit lnw_gpio_probe(struct pci_dev *pdev,
 		dev_err(&pdev->dev, "langwell gpiochip_add error %d\n", retval);
 		goto err5;
 	}
-	set_irq_data(pdev->irq, lnw);
-	set_irq_chained_handler(pdev->irq, lnw_irq_handler);
+	irq_set_handler_data(pdev->irq, lnw);
+	irq_set_chained_handler(pdev->irq, lnw_irq_handler);
 	for (i = 0; i < lnw->chip.ngpio; i++) {
-		set_irq_chip_and_handler_name(i + lnw->irq_base, &lnw_irqchip,
-					handle_simple_irq, "demux");
-		set_irq_chip_data(i + lnw->irq_base, lnw);
+		irq_set_chip_and_handler_name(i + lnw->irq_base, &lnw_irqchip,
+					      handle_simple_irq, "demux");
+		irq_set_chip_data(i + lnw->irq_base, lnw);
 	}
 
 	spin_lock_init(&lnw->lock);
@@ -300,9 +304,88 @@ static struct pci_driver lnw_gpio_driver = {
 	.probe		= lnw_gpio_probe,
 };
 
+
+static int __devinit wp_gpio_probe(struct platform_device *pdev)
+{
+	struct lnw_gpio *lnw;
+	struct gpio_chip *gc;
+	struct resource *rc;
+	int retval = 0;
+
+	rc = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!rc)
+		return -EINVAL;
+
+	lnw = kzalloc(sizeof(struct lnw_gpio), GFP_KERNEL);
+	if (!lnw) {
+		dev_err(&pdev->dev,
+			"can't allocate whitneypoint_gpio chip data\n");
+		return -ENOMEM;
+	}
+	lnw->reg_base = ioremap_nocache(rc->start, resource_size(rc));
+	if (lnw->reg_base == NULL) {
+		retval = -EINVAL;
+		goto err_kmalloc;
+	}
+	spin_lock_init(&lnw->lock);
+	gc = &lnw->chip;
+	gc->label = dev_name(&pdev->dev);
+	gc->owner = THIS_MODULE;
+	gc->direction_input = lnw_gpio_direction_input;
+	gc->direction_output = lnw_gpio_direction_output;
+	gc->get = lnw_gpio_get;
+	gc->set = lnw_gpio_set;
+	gc->to_irq = NULL;
+	gc->base = 0;
+	gc->ngpio = 64;
+	gc->can_sleep = 0;
+	retval = gpiochip_add(gc);
+	if (retval) {
+		dev_err(&pdev->dev, "whitneypoint gpiochip_add error %d\n",
+								retval);
+		goto err_ioremap;
+	}
+	platform_set_drvdata(pdev, lnw);
+	return 0;
+err_ioremap:
+	iounmap(lnw->reg_base);
+err_kmalloc:
+	kfree(lnw);
+	return retval;
+}
+
+static int __devexit wp_gpio_remove(struct platform_device *pdev)
+{
+	struct lnw_gpio *lnw = platform_get_drvdata(pdev);
+	int err;
+	err = gpiochip_remove(&lnw->chip);
+	if (err)
+		dev_err(&pdev->dev, "failed to remove gpio_chip.\n");
+	iounmap(lnw->reg_base);
+	kfree(lnw);
+	platform_set_drvdata(pdev, NULL);
+	return 0;
+}
+
+static struct platform_driver wp_gpio_driver = {
+	.probe		= wp_gpio_probe,
+	.remove		= __devexit_p(wp_gpio_remove),
+	.driver		= {
+		.name	= "wp_gpio",
+		.owner	= THIS_MODULE,
+	},
+};
+
 static int __init lnw_gpio_init(void)
 {
-	return pci_register_driver(&lnw_gpio_driver);
+	int ret;
+	ret =  pci_register_driver(&lnw_gpio_driver);
+	if (ret < 0)
+		return ret;
+	ret = platform_driver_register(&wp_gpio_driver);
+	if (ret < 0)
+		pci_unregister_driver(&lnw_gpio_driver);
+	return ret;
 }
 
 device_initcall(lnw_gpio_init);

@@ -86,6 +86,8 @@ do { \
 
 /**
  * enum p9_msg_t - 9P message types
+ * @P9_TLERROR: not used
+ * @P9_RLERROR: response for any failed request for 9P2000.L
  * @P9_TSTATFS: file system status request
  * @P9_RSTATFS: file system status response
  * @P9_TSYMLINK: make symlink request
@@ -117,7 +119,7 @@ do { \
  * @P9_TREAD: request to transfer data from a file or directory
  * @P9_RREAD: response with data requested
  * @P9_TWRITE: reuqest to transfer data to a file
- * @P9_RWRITE: response with out much data was transfered to file
+ * @P9_RWRITE: response with out much data was transferred to file
  * @P9_TCLUNK: forget about a handle to an entity within the file system
  * @P9_RCLUNK: response when server has forgotten about the handle
  * @P9_TREMOVE: request to remove an entity from the hierarchy
@@ -137,6 +139,8 @@ do { \
  */
 
 enum p9_msg_t {
+	P9_TLERROR = 6,
+	P9_RLERROR,
 	P9_TSTATFS = 8,
 	P9_RSTATFS,
 	P9_TLOPEN = 12,
@@ -149,6 +153,8 @@ enum p9_msg_t {
 	P9_RMKNOD,
 	P9_TRENAME = 20,
 	P9_RRENAME,
+	P9_TREADLINK = 22,
+	P9_RREADLINK,
 	P9_TGETATTR = 24,
 	P9_RGETATTR,
 	P9_TSETATTR = 26,
@@ -159,6 +165,12 @@ enum p9_msg_t {
 	P9_RXATTRCREATE,
 	P9_TREADDIR = 40,
 	P9_RREADDIR,
+	P9_TFSYNC = 50,
+	P9_RFSYNC,
+	P9_TLOCK = 52,
+	P9_RLOCK,
+	P9_TGETLOCK = 54,
+	P9_RGETLOCK,
 	P9_TLINK = 70,
 	P9_RLINK,
 	P9_TMKDIR = 72,
@@ -280,7 +292,7 @@ enum p9_perm_t {
  *
  * QID types are a subset of permissions - they are primarily
  * used to differentiate semantics for a file system entity via
- * a jump-table.  Their value is also the most signifigant 16 bits
+ * a jump-table.  Their value is also the most significant 16 bits
  * of the permission_t
  *
  * See Also: http://plan9.bell-labs.com/magic/man2html/2/stat
@@ -352,8 +364,8 @@ struct p9_qid {
 /**
  * struct p9_stat - file system metadata information
  * @size: length prefix for this stat structure instance
- * @type: the type of the server (equivilent to a major number)
- * @dev: the sub-type of the server (equivilent to a minor number)
+ * @type: the type of the server (equivalent to a major number)
+ * @dev: the sub-type of the server (equivalent to a minor number)
  * @qid: unique id from the server of type &p9_qid
  * @mode: Plan 9 format permissions of type &p9_perm_t
  * @atime: Last access/read time
@@ -456,6 +468,48 @@ struct p9_iattr_dotl {
 	u64 atime_nsec;
 	u64 mtime_sec;
 	u64 mtime_nsec;
+};
+
+#define P9_LOCK_SUCCESS 0
+#define P9_LOCK_BLOCKED 1
+#define P9_LOCK_ERROR 2
+#define P9_LOCK_GRACE 3
+
+#define P9_LOCK_FLAGS_BLOCK 1
+#define P9_LOCK_FLAGS_RECLAIM 2
+
+/* struct p9_flock: POSIX lock structure
+ * @type - type of lock
+ * @flags - lock flags
+ * @start - starting offset of the lock
+ * @length - number of bytes
+ * @proc_id - process id which wants to take lock
+ * @client_id - client id
+ */
+
+struct p9_flock {
+	u8 type;
+	u32 flags;
+	u64 start;
+	u64 length;
+	u32 proc_id;
+	char *client_id;
+};
+
+/* struct p9_getlock: getlock structure
+ * @type - type of lock
+ * @start - starting offset of the lock
+ * @length - number of bytes
+ * @proc_id - process id which wants to take lock
+ * @client_id - client id
+ */
+
+struct p9_getlock {
+	u8 type;
+	u64 start;
+	u64 length;
+	u32 proc_id;
+	char *client_id;
 };
 
 /* Structures for Protocol Operations */
@@ -634,7 +688,11 @@ struct p9_rwstat {
  * @id: protocol operating identifier of type &p9_msg_t
  * @tag: transaction id of the request
  * @offset: used by marshalling routines to track currentposition in buffer
- * @capacity: used by marshalling routines to track total capacity
+ * @capacity: used by marshalling routines to track total malloc'd capacity
+ * @pubuf: Payload user buffer given by the caller
+ * @pubuf: Payload kernel buffer given by the caller
+ * @pbuf_size: pubuf/pkbuf(only one will be !NULL) size to be read/write.
+ * @private: For transport layer's use.
  * @sdata: payload
  *
  * &p9_fcall represents the structure for all 9P RPC
@@ -651,6 +709,10 @@ struct p9_fcall {
 
 	size_t offset;
 	size_t capacity;
+	char __user *pubuf;
+	char *pkbuf;
+	size_t pbuf_size;
+	void *private;
 
 	uint8_t *sdata;
 };

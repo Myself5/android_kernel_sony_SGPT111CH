@@ -1,4 +1,3 @@
-/* 2011-06-10: File changed by Sony Corporation */
 /*
  * Copyright (C) 2004, OGAWA Hirofumi
  * Released under GPL v2.
@@ -8,6 +7,7 @@
 #include <linux/fs.h>
 #include <linux/msdos_fs.h>
 #include <linux/blkdev.h>
+#include <linux/ratelimit.h>
 #include "fat.h"
 
 struct fatent_operations {
@@ -125,7 +125,7 @@ static int fat_ent_bread(struct super_block *sb, struct fat_entry *fatent,
 	fatent->fat_inode = MSDOS_SB(sb)->fat_inode;
 	fatent->bhs[0] = sb_bread(sb, blocknr);
 	if (!fatent->bhs[0]) {
-		printk(KERN_ERR "FAT: FAT read failed (blocknr %llu)\n",
+		printk_ratelimited(KERN_ERR "FAT: FAT read failed (blocknr %llu)\n",
 		       (llu)blocknr);
 		return -EIO;
 	}
@@ -877,7 +877,8 @@ int fat_free_clusters(struct inode *inode, int cluster)
 
 				sb_issue_discard(sb,
 					fat_clus_to_blknr(sbi, first_cl),
-					nr_clus * sbi->sec_per_clus);
+					nr_clus * sbi->sec_per_clus,
+					GFP_NOFS, 0);
 
 				first_cl = cluster;
 			}

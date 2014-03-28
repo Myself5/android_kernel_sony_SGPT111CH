@@ -23,7 +23,6 @@
 #include <linux/mfd/max8907c.h>
 #include <linux/regulator/max8907c-regulator.h>
 #include <linux/gpio.h>
-#include <mach/suspend.h>
 #include <linux/io.h>
 
 #include <mach/iomap.h>
@@ -31,7 +30,7 @@
 
 #include "gpio-names.h"
 #include "fuse.h"
-#include "power.h"
+#include "pm.h"
 #include "wakeups-t2.h"
 #include "board.h"
 
@@ -44,6 +43,7 @@ static struct regulator_consumer_supply max8907c_SD1_supply[] = {
 
 static struct regulator_consumer_supply max8907c_SD2_supply[] = {
 	REGULATOR_SUPPLY("vdd_core", NULL),
+	REGULATOR_SUPPLY("vdd_aon", NULL),
 };
 
 static struct regulator_consumer_supply max8907c_SD3_supply[] = {
@@ -244,13 +244,9 @@ static struct tegra_suspend_platform_data whistler_suspend_data = {
 	.suspend_mode	= TEGRA_SUSPEND_LP0,
 	.core_timer	= 0x7e,
 	.core_off_timer = 0xc00,
-	.separate_req	= false,
 	.corereq_high	= true,
 	.sysclkreq_high	= true,
-	.wake_enb	= TEGRA_WAKE_KBC_EVENT,
-	.wake_high	= 0,
-	.wake_low	= 0,
-	.wake_any	= TEGRA_WAKE_KBC_EVENT,
+	.combined_req   = true,
 };
 
 int __init whistler_regulator_init(void)

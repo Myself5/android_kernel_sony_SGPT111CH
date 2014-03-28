@@ -130,11 +130,10 @@ static void __init wbd222_init(void)
 		wbd222_num_partitions);
 	platform_device_register(&wbd222_leds_device);
 	platform_device_register(&wbd222_keys_device);
+	platform_register_rtc();
 }
 
 MACHINE_START(WBD222, "Wiliboard WBD-222")
-	.phys_io	= 0x7fffc000,
-	.io_pg_offst	= ((0xffffc000) >> 18) & 0xfffc,
 	.boot_params	= 0x100,
 	.map_io		= gemini_map_io,
 	.init_irq	= gemini_init_irq,

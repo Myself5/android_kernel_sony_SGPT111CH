@@ -1,4 +1,4 @@
-/* 2011-06-10: File added by Sony Corporation */
+/* 2012-07-20: File added by Sony Corporation */
 /*
  * Copyright (C) 2011 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
@@ -15,11 +15,31 @@
 /*
  * nbx02 backlight driver data - see drivers/video/backlight/nbx02_bl.c
  */
+
 #ifndef __LINUX_NBX02_BACKLIGHT_H
 #define __LINUX_NBX02_BACKLIGHT_H
+
+#include <linux/types.h>
+#include <linux/ioctl.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 struct platform_nbx02_backlight_data {
 	struct platform_pwm_backlight_data pwm[2];
 };
 
+typedef int32_t		nbx_ioc_light[2];
+
+#define NBX_BACKLIGHT_IOC_MAGIC 'b'
+#define NBX_BACKLIGHT_IOC_SET_EXPIRE_TIME_MS _IOW(NBX_BACKLIGHT_IOC_MAGIC, 0, int32_t)
+#define NBX_BACKLIGHT_IOC_GET_EXPIRE_TIME_MS _IOR(NBX_BACKLIGHT_IOC_MAGIC, 1, int32_t)
+#define NBX_BACKLIGHT_IOC_SET_LIGHT          _IOW(NBX_BACKLIGHT_IOC_MAGIC, 2, nbx_ioc_light)
+#define NBX_BACKLIGHT_IOC_GET_LIGHT          _IOR(NBX_BACKLIGHT_IOC_MAGIC, 3, nbx_ioc_light)
+#define NBX_BACKLIGHT_IOC_MAXNR (_IOC_NR(NBX_BACKLIGHT_IOC_GET_LIGHT))
+
+#ifdef __cplusplus
+}
 #endif
+
+#endif /* __LINUX_NBX02_BACKLIGHT_H */

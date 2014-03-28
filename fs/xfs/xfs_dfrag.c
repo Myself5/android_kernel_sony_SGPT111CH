@@ -270,9 +270,9 @@ xfs_swap_extents(
 	/* check inode formats now that data is flushed */
 	error = xfs_swap_extents_check_format(ip, tip);
 	if (error) {
-		xfs_fs_cmn_err(CE_NOTE, mp,
+		xfs_notice(mp,
 		    "%s: inode 0x%llx format is incompatible for exchanging.",
-				__FILE__, ip->i_ino);
+				__func__, ip->i_ino);
 		goto out_unlock;
 	}
 
@@ -376,6 +376,19 @@ xfs_swap_extents(
 	tmp = (__uint64_t) ip->i_d.di_format;
 	ip->i_d.di_format = tip->i_d.di_format;
 	tip->i_d.di_format = tmp;
+
+	/*
+	 * The extents in the source inode could still contain speculative
+	 * preallocation beyond EOF (e.g. the file is open but not modified
+	 * while defrag is in progress). In that case, we need to copy over the
+	 * number of delalloc blocks the data fork in the source inode is
+	 * tracking beyond EOF so that when the fork is truncated away when the
+	 * temporary inode is unlinked we don't underrun the i_delayed_blks
+	 * counter on that inode.
+	 */
+	ASSERT(tip->i_delayed_blks == 0);
+	tip->i_delayed_blks = ip->i_delayed_blks;
+	ip->i_delayed_blks = 0;
 
 	ilf_fields = XFS_ILOG_CORE;
 

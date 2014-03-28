@@ -69,7 +69,7 @@ void cfcnfg_remove(struct cfcnfg *cfg);
  *		cfcnfg_add_adapt_layer to specify PHY for the link.
  * @pref:	The phy (link layer) preference.
  * @fcs:	Specify if checksum is used in CAIF Framing Layer.
- * @stx:	Specify if Start Of Frame eXtention is used.
+ * @stx:	Specify if Start Of Frame extension is used.
  */
 
 void
@@ -139,10 +139,10 @@ struct dev_info *cfcnfg_get_phyid(struct cfcnfg *cnfg,
 		     enum cfcnfg_phy_preference phy_pref);
 
 /**
- * cfcnfg_get_named() - Get the Physical Identifier of CAIF Link Layer
+ * cfcnfg_get_id_from_ifi() - Get the Physical Identifier of ifindex,
+ * 			it matches caif physical id with the kernel interface id.
  * @cnfg:	Configuration object
- * @name:	Name of the Physical Layer (Caif Link Layer)
+ * @ifi:	ifindex obtained from socket.c bindtodevice.
  */
-int cfcnfg_get_named(struct cfcnfg *cnfg, char *name);
-
+int cfcnfg_get_id_from_ifi(struct cfcnfg *cnfg, int ifi);
 #endif				/* CFCNFG_H_ */

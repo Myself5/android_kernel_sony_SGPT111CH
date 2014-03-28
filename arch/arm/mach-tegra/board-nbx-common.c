@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.
@@ -33,4 +33,48 @@ early_param("odmdata", nbx_odmdata_arg);
 u32 nbx_get_odmdata()
 {
 	return s_odmdata;
+
+
+}
+
+// NBXTODO:should be cared by ec_ipc driver
+#include <linux/gpio.h>
+#include <linux/interrupt.h>
+#include <mach/gpio.h>
+#include "gpio-names.h"
+
+static irqreturn_t ecipc_irq(int irq, void *dev_id)
+{
+	/* dummy */
+	return IRQ_HANDLED;
+}
+void nbx_ecipc_irq_setup(int gpio_num, int irqf_trigger)
+{
+	int err;
+	int irq_num = gpio_to_irq(gpio_num);
+	tegra_gpio_enable(gpio_num);
+	err = gpio_request(gpio_num, "ECIPC interrupt");
+	if (err < 0) {
+		pr_err("%s - gpio request ECIPC_IRQ failed\n", __func__);
+		goto errout;
+	}
+	err = gpio_direction_input(gpio_num);
+	if (err < 0) {
+		pr_err("%s - gpio direction input ECIPC_IRQ failed\n", __func__);
+		goto errout;
+	}
+	err = request_irq(irq_num,
+			ecipc_irq,
+			irqf_trigger,
+			"ECIPC_IRQ",
+			NULL);
+	if (err < 0) {
+		pr_err("%s - request irq ECIPC_IRQ failed\n", __func__);
+		goto errout;
+	}
+	irq_set_irq_wake(irq_num, 1);
+
+	//enable_irq(irq_num);
+errout:
+	;
 }

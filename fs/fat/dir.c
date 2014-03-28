@@ -1,4 +1,3 @@
-/* 2011-06-10: File changed by Sony Corporation */
 /*
  *  linux/fs/fat/dir.c
  *
@@ -22,6 +21,7 @@
 #include <linux/sched.h>
 #include <asm/uaccess.h>
 #include <linux/kernel.h>
+#include <linux/ratelimit.h>
 #include "fat.h"
 
 /*
@@ -283,7 +283,7 @@ next:
 
 	*bh = sb_bread(sb, phys);
 	if (*bh == NULL) {
-		printk(KERN_ERR "FAT: Directory bread(block %llu) failed\n",
+		printk_ratelimited(KERN_ERR "FAT: Directory bread(block %llu) failed\n",
 		       (llu)phys);
 		/* skip this block */
 		*pos = (iblock + 1) << sb->s_blocksize_bits;

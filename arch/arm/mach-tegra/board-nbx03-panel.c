@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * arch/arm/mach-tegra/board-nbx03-panel.c
  *
@@ -27,13 +27,13 @@
 #include <linux/platform_device.h>
 #include <linux/earlysuspend.h>
 #include <linux/pwm_backlight.h>
-#include <mach/nvhost.h>
+#include <linux/nvhost.h>
 #include <mach/nvmap.h>
 #include <mach/irqs.h>
 #include <mach/iomap.h>
 #include <mach/dc.h>
 #include <mach/fb.h>
-#include <mach/tegra2_fuse.h>
+#include <mach/tegra_odm_fuses.h>
 
 #include "devices.h"
 #include "gpio-names.h"
@@ -151,6 +151,7 @@ static struct tegra_dc_mode nbx03_panel_modes[] = {
 		.v_active = 800,
 		.h_front_porch = 90,
 		.v_front_porch = 3,
+		.flags = TEGRA_DC_MODE_FLAG_NEG_V_SYNC | TEGRA_DC_MODE_FLAG_NEG_H_SYNC,
 	},
 };
 
@@ -183,44 +184,38 @@ static struct tegra_dc_out nbx03_disp1_out = {
 	.order		= TEGRA_DC_ORDER_RED_BLUE,
 
 	.depth		= 18,
-//	.dither		= TEGRA_DC_DISABLE_DITHER,
+	//.dither		= TEGRA_DC_DISABLE_DITHER,
 	.dither		= TEGRA_DC_ORDERED_DITHER,
-//	.dither		= TEGRA_DC_ERRDIFF_DITHER,
+	//.dither		= TEGRA_DC_ERRDIFF_DITHER,
 
 	.modes	 	= nbx03_panel_modes,
-	.n_modes		= ARRAY_SIZE(nbx03_panel_modes),
+	.n_modes	= ARRAY_SIZE(nbx03_panel_modes),
 
 	.enable		= nbx03_panel_enable,
-	.disable		= nbx03_panel_disable,
+	.disable	= nbx03_panel_disable,
 
-	.out_pins		= nbx03_panel_out_pins,
-	.n_out_pins		= ARRAY_SIZE(nbx03_panel_out_pins),
+	.out_pins	= nbx03_panel_out_pins,
+	.n_out_pins	= ARRAY_SIZE(nbx03_panel_out_pins),
 };
 
 static struct tegra_dc_platform_data nbx03_disp1_pdata = {
 	.flags		= TEGRA_DC_FLAG_ENABLED,
-	.default_out		= &nbx03_disp1_out,
+	.default_out	= &nbx03_disp1_out,
 	.fb		= &nbx03_fb_data,
 };
 
 static struct nvhost_device nbx03_disp1_device = {
 	.name		= "tegradc",
 	.id		= 0,
-	.resource		= nbx03_disp1_resources,
-	.num_resources		= ARRAY_SIZE(nbx03_disp1_resources),
+	.resource	= nbx03_disp1_resources,
+	.num_resources	= ARRAY_SIZE(nbx03_disp1_resources),
 	.dev = {
 		.platform_data = &nbx03_disp1_pdata,
 	},
 };
 
 static struct nvmap_platform_carveout nbx03_carveouts[] = {
-	[0] = {
-		.name		= "iram",
-		.usage_mask	= NVMAP_HEAP_CARVEOUT_IRAM,
-		.base		= TEGRA_IRAM_BASE,
-		.size		= TEGRA_IRAM_SIZE,
-		.buddy_size	= 0, /* no buddy allocation for IRAM */
-	},
+	[0] = NVMAP_HEAP_CARVEOUT_IRAM_INIT,
 	[1] = {
 		.name		= "generic-0",
 		.usage_mask	= NVMAP_HEAP_CARVEOUT_GENERIC,
@@ -243,7 +238,9 @@ static struct platform_device nbx03_nvmap_device = {
 
 static struct platform_device *nbx03_gfx_devices[] __initdata = {
 	&nbx03_nvmap_device,
+#ifdef CONFIG_TEGRA_GRHOST
 	&tegra_grhost_device,
+#endif
 	&tegra_pwfm0_device,
 	&nbx03_backlight_device,
 };

@@ -48,7 +48,7 @@ static int mbm_wow_suspend(struct platform_device *pdev, pm_message_t state)
             dev_err(&pdev->dev, "FAILED to get wake IRQ\n");
             return -ENXIO;
         }
-        set_irq_type(irq, IRQ_TYPE_LEVEL_LOW);
+        irq_set_irq_type(irq, IRQ_TYPE_LEVEL_LOW);
         enable_irq_wake(irq);
     }
 

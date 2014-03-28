@@ -1,4 +1,3 @@
-/* 2011-06-10: File changed by Sony Corporation */
 #ifndef _LINUX_MSDOS_FS_H
 #define _LINUX_MSDOS_FS_H
 

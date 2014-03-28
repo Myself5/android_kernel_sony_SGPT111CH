@@ -29,6 +29,7 @@
 #include <linux/workqueue.h>
 #include <linux/i2c/twl.h>
 #include <linux/mfd/twl4030-codec.h>
+#include <linux/mfd/core.h>
 #include <linux/input.h>
 #include <linux/slab.h>
 
@@ -196,7 +197,7 @@ static SIMPLE_DEV_PM_OPS(twl4030_vibra_pm_ops,
 
 static int __devinit twl4030_vibra_probe(struct platform_device *pdev)
 {
-	struct twl4030_codec_vibra_data *pdata = pdev->dev.platform_data;
+	struct twl4030_codec_vibra_data *pdata = mfd_get_data(pdev);
 	struct vibra_info *info;
 	int ret;
 
@@ -271,7 +272,7 @@ static struct platform_driver twl4030_vibra_driver = {
 	.probe		= twl4030_vibra_probe,
 	.remove		= __devexit_p(twl4030_vibra_remove),
 	.driver		= {
-		.name	= "twl4030_codec_vibra",
+		.name	= "twl4030-vibra",
 		.owner	= THIS_MODULE,
 #ifdef CONFIG_PM
 		.pm	= &twl4030_vibra_pm_ops,
@@ -291,7 +292,7 @@ static void __exit twl4030_vibra_exit(void)
 }
 module_exit(twl4030_vibra_exit);
 
-MODULE_ALIAS("platform:twl4030_codec_vibra");
+MODULE_ALIAS("platform:twl4030-vibra");
 
 MODULE_DESCRIPTION("TWL4030 Vibra driver");
 MODULE_LICENSE("GPL");

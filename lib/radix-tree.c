@@ -49,7 +49,7 @@ struct radix_tree_node {
 	unsigned int	height;		/* Height from the bottom */
 	unsigned int	count;
 	struct rcu_head	rcu_head;
-	void		*slots[RADIX_TREE_MAP_SIZE];
+	void __rcu	*slots[RADIX_TREE_MAP_SIZE];
 	unsigned long	tags[RADIX_TREE_MAX_TAGS][RADIX_TREE_TAG_LONGS];
 };
 
@@ -736,10 +736,11 @@ next:
 		}
 	}
 	/*
-	 * The iftag must have been set somewhere because otherwise
-	 * we would return immediated at the beginning of the function
+	 * We need not to tag the root tag if there is no tag which is set with
+	 * settag within the range from *first_indexp to last_index.
 	 */
-	root_tag_set(root, settag);
+	if (tagged > 0)
+		root_tag_set(root, settag);
 	*first_indexp = index;
 
 	return tagged;

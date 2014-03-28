@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * arch/arm/mach-tegra/board-nbx02-pinmux.c
  *
@@ -17,7 +17,11 @@
 
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/gpio.h>
 #include <mach/pinmux.h>
+
+#include "board-nbx02.h"
+#include "gpio-names.h"
 
 #define DEFAULT_DRIVE(_name)					\
 	{							\
@@ -55,12 +59,24 @@
 		.slew_falling = TEGRA_SLEW_SLOWEST,		\
 	} 
 
+#define SDMMC3_DRIVE(_name)					\
+	{							\
+		.pingroup = TEGRA_DRIVE_PINGROUP_##_name,	\
+		.hsm = TEGRA_HSM_DISABLE,			\
+		.schmitt = TEGRA_SCHMITT_ENABLE,		\
+		.drive = TEGRA_DRIVE_DIV_1,			\
+		.pull_down = TEGRA_PULL_15,			\
+		.pull_up = TEGRA_PULL_4,			\
+		.slew_rising = TEGRA_SLEW_SLOWEST,		\
+		.slew_falling = TEGRA_SLEW_SLOWEST,		\
+	}
+
 static __initdata struct tegra_drive_pingroup_config nbx02_drive_pinmux[] = {
 	DEFAULT_DRIVE(AO1),
 	DEFAULT_DRIVE(AO2),
 	LOWEST_DRIVE(CDEV2),
 	DEFAULT_DRIVE(SDMMC2),
-	LOWEST_DRIVE(SDMMC3),
+	SDMMC3_DRIVE(SDMMC3),
 	DEFAULT_DRIVE(DBG),
 	DEFAULT_DRIVE(VI1),
 	DEFAULT_DRIVE(VI2),
@@ -74,6 +90,8 @@ static __initdata struct tegra_drive_pingroup_config nbx02_drive_pinmux[] = {
 	LOWEST_DRIVE(GME),
 	EXTLOW_DRIVE(DAP1),
 	EXTLOW_DRIVE(CDEV1), 
+	EXTLOW_DRIVE(DAP3),
+	EXTLOW_DRIVE(DAP4),
 };
 
 static __initdata struct tegra_pingroup_config nbx02_pinmux[] = {
@@ -180,7 +198,7 @@ static __initdata struct tegra_pingroup_config nbx02_pinmux[] = {
 	{TEGRA_PINGROUP_UAA,   TEGRA_MUX_SAFE,          TEGRA_PUPD_PULL_UP,   TEGRA_TRI_NORMAL},
 	{TEGRA_PINGROUP_UAB,   TEGRA_MUX_SAFE,          TEGRA_PUPD_PULL_UP,   TEGRA_TRI_NORMAL},
 	{TEGRA_PINGROUP_UAC,   TEGRA_MUX_SAFE,          TEGRA_PUPD_NORMAL,    TEGRA_TRI_NORMAL},
-	{TEGRA_PINGROUP_UAD,   TEGRA_MUX_SAFE,          TEGRA_PUPD_PULL_UP,   TEGRA_TRI_NORMAL},
+	{TEGRA_PINGROUP_UAD,   TEGRA_MUX_IRDA,          TEGRA_PUPD_PULL_UP,   TEGRA_TRI_NORMAL},
 	{TEGRA_PINGROUP_UCA,   TEGRA_MUX_UARTC,         TEGRA_PUPD_PULL_UP,   TEGRA_TRI_NORMAL},
 	{TEGRA_PINGROUP_UCB,   TEGRA_MUX_UARTC,         TEGRA_PUPD_PULL_UP,   TEGRA_TRI_NORMAL},
 	{TEGRA_PINGROUP_UDA,   TEGRA_MUX_UARTD,         TEGRA_PUPD_NORMAL,    TEGRA_TRI_NORMAL},
@@ -195,9 +213,20 @@ static __initdata struct tegra_pingroup_config nbx02_pinmux[] = {
 	{TEGRA_PINGROUP_XM2D,  TEGRA_MUX_NONE,          TEGRA_PUPD_NORMAL,    TEGRA_TRI_NORMAL},
 };
 
-void __init nbx02_pinmux_init(void)
+static struct tegra_gpio_table gpio_table[] = {
+	{ .gpio = TEGRA_GPIO_CDC_IRQ,		.enable = true	},
+	{ .gpio = TEGRA_GPIO_CDC_SHRT,		.enable = true	},
+	{ .gpio = TEGRA_GPIO_HP_DET,		.enable = true	},
+	//{ .gpio = TEGRA_GPIO_INT_MIC_EN,	.enable = true	},
+	//{ .gpio = TEGRA_GPIO_EXT_MIC_EN,	.enable = true	},
+};
+
+int __init nbx02_pinmux_init(void)
 {
 	tegra_pinmux_config_table(nbx02_pinmux, ARRAY_SIZE(nbx02_pinmux));
 	tegra_drive_pinmux_config_table(nbx02_drive_pinmux,
 					ARRAY_SIZE(nbx02_drive_pinmux));
+
+	tegra_gpio_config(gpio_table, ARRAY_SIZE(gpio_table));
+	return 0;
 }

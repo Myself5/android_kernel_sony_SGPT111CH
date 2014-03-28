@@ -1,4 +1,3 @@
-/* 2011-06-10: File added by Sony Corporation */
 /*
  * based upon glibc-2.2.5 time/tzset.c
  *

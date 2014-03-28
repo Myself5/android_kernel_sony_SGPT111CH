@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * Source for:
  * Cypress TrueTouch(TM) Standard Product (TTSP) I2C touchscreen driver.

@@ -76,6 +76,8 @@ static void edac_mc_dump_mci(struct mem_ctl_info *mci)
 	debugf3("\tpvt_info = %p\n\n", mci->pvt_info);
 }
 
+#endif				/* CONFIG_EDAC_DEBUG */
+
 /*
  * keep those in sync with the enum mem_type
  */
@@ -99,8 +101,6 @@ const char *edac_mem_types[] = {
 	"Registered DDR3 RAM",
 };
 EXPORT_SYMBOL_GPL(edac_mem_types);
-
-#endif				/* CONFIG_EDAC_DEBUG */
 
 /* 'ptr' points to a possibly unaligned item X such that sizeof(X) is 'size'.
  * Adjust 'ptr' so that its alignment is at least as stringent as what the
@@ -207,6 +207,7 @@ struct mem_ctl_info *edac_mc_alloc(unsigned sz_pvt, unsigned nr_csrows,
 	}
 
 	mci->op_state = OP_ALLOC;
+	INIT_LIST_HEAD(&mci->grp_kobj_list);
 
 	/*
 	 * Initialize the 'root' kobj for the edac_mc controller
@@ -234,18 +235,24 @@ EXPORT_SYMBOL_GPL(edac_mc_alloc);
  */
 void edac_mc_free(struct mem_ctl_info *mci)
 {
+	debugf1("%s()\n", __func__);
+
 	edac_mc_unregister_sysfs_main_kobj(mci);
+
+	/* free the mci instance memory here */
+	kfree(mci);
 }
 EXPORT_SYMBOL_GPL(edac_mc_free);
 
 
-/*
+/**
  * find_mci_by_dev
  *
  *	scan list of controllers looking for the one that manages
  *	the 'dev' device
+ * @dev: pointer to a struct device related with the MCI
  */
-static struct mem_ctl_info *find_mci_by_dev(struct device *dev)
+struct mem_ctl_info *find_mci_by_dev(struct device *dev)
 {
 	struct mem_ctl_info *mci;
 	struct list_head *item;
@@ -261,6 +268,7 @@ static struct mem_ctl_info *find_mci_by_dev(struct device *dev)
 
 	return NULL;
 }
+EXPORT_SYMBOL_GPL(find_mci_by_dev);
 
 /*
  * handler for EDAC to check if NMI type handler has asserted interrupt
@@ -716,7 +724,7 @@ void edac_mc_handle_ce(struct mem_ctl_info *mci,
 		 * Some MC's can remap memory so that it is still available
 		 * at a different address when PCI devices map into memory.
 		 * MC's that can't do this lose the memory where PCI devices
-		 * are mapped.  This mapping is MC dependant and so we call
+		 * are mapped.  This mapping is MC dependent and so we call
 		 * back into the MC driver for it to map the MC page to
 		 * a physical (CPU) page which can then be mapped to a virtual
 		 * page - which can then be scrubbed.

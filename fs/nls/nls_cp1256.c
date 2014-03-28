@@ -1,4 +1,3 @@
-/* 2011-06-10: File added by Sony Corporation */
 /*
  * Charset cp1256 translation tables.
  * Generated automatically from the Unicode and charset

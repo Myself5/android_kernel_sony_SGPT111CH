@@ -790,6 +790,7 @@ static const char *section_white_list[] =
 {
 	".comment*",
 	".debug*",
+	".zdebug*",		/* Compressed debug sections. */
 	".GCC-command-line",	/* mn10300 */
 	".mdebug*",        /* alpha, score, mips etc. */
 	".pdr",            /* alpha, score, mips etc. */
@@ -1208,6 +1209,9 @@ static Elf_Sym *find_elf_symbol2(struct elf_info *elf, Elf_Addr addr,
  * .cpuinit.data => __cpudata
  * .memexitconst => __memconst
  * etc.
+ *
+ * The memory of returned value has been allocated on a heap. The user of this
+ * method should free it after usage.
 */
 static char *sec2annotation(const char *s)
 {
@@ -1230,7 +1234,7 @@ static char *sec2annotation(const char *s)
 			strcat(p, "data ");
 		else
 			strcat(p, " ");
-		return r; /* we leak her but we do not care */
+		return r;
 	} else {
 		return strdup("");
 	}
@@ -1242,6 +1246,19 @@ static int is_function(Elf_Sym *sym)
 		return ELF_ST_TYPE(sym->st_info) == STT_FUNC;
 	else
 		return -1;
+}
+
+static void print_section_list(const char * const list[20])
+{
+	const char *const *s = list;
+
+	while (*s) {
+		fprintf(stderr, "%s", *s);
+		s++;
+		if (*s)
+			fprintf(stderr, ", ");
+	}
+	fprintf(stderr, "\n");
 }
 
 /*
@@ -1300,7 +1317,6 @@ static void report_sec_mismatch(const char *modname,
 		break;
 	case DATA_TO_ANY_INIT: {
 		prl_to = sec2annotation(tosec);
-		const char *const *s = mismatch->symbol_white_list;
 		fprintf(stderr,
 		"The variable %s references\n"
 		"the %s %s%s%s\n"
@@ -1308,9 +1324,7 @@ static void report_sec_mismatch(const char *modname,
 		"variable with __init* or __refdata (see linux/init.h) "
 		"or name the variable:\n",
 		fromsym, to, prl_to, tosym, to_p);
-		while (*s)
-			fprintf(stderr, "%s, ", *s++);
-		fprintf(stderr, "\n");
+		print_section_list(mismatch->symbol_white_list);
 		free(prl_to);
 		break;
 	}
@@ -1325,7 +1339,6 @@ static void report_sec_mismatch(const char *modname,
 		break;
 	case DATA_TO_ANY_EXIT: {
 		prl_to = sec2annotation(tosec);
-		const char *const *s = mismatch->symbol_white_list;
 		fprintf(stderr,
 		"The variable %s references\n"
 		"the %s %s%s%s\n"
@@ -1333,9 +1346,7 @@ static void report_sec_mismatch(const char *modname,
 		"variable with __exit* (see linux/init.h) or "
 		"name the variable:\n",
 		fromsym, to, prl_to, tosym, to_p);
-		while (*s)
-			fprintf(stderr, "%s, ", *s++);
-		fprintf(stderr, "\n");
+		print_section_list(mismatch->symbol_white_list);
 		free(prl_to);
 		break;
 	}
@@ -1438,7 +1449,7 @@ static unsigned int *reloc_location(struct elf_info *elf,
 	int section = shndx2secindex(sechdr->sh_info);
 
 	return (void *)elf->hdr + sechdrs[section].sh_offset +
-		r->r_offset - sechdrs[section].sh_addr;
+		r->r_offset;
 }
 
 static int addend_386_rel(struct elf_info *elf, Elf_Shdr *sechdr, Elf_Rela *r)
@@ -1611,7 +1622,7 @@ static void section_rel(const char *modname, struct elf_info *elf,
  * A module includes a number of sections that are discarded
  * either when loaded or when used as built-in.
  * For loaded modules all functions marked __init and all data
- * marked __initdata will be discarded when the module has been intialized.
+ * marked __initdata will be discarded when the module has been initialized.
  * Likewise for modules used built-in the sections marked __exit
  * are discarded because __exit marked function are supposed to be called
  * only when a module is unloaded which never happens for built-in modules.

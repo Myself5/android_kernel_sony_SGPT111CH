@@ -25,7 +25,9 @@
 struct tegra_pwm_bl_data {
 	struct device *dev;
 	int which_dc;
+	int (*notify)(struct device *, int brightness);
 	struct tegra_dc_pwm_params params;
+	int (*check_fb)(struct device *dev, struct fb_info *info);
 };
 
 static int tegra_pwm_backlight_update_status(struct backlight_device *bl)
@@ -41,12 +43,19 @@ static int tegra_pwm_backlight_update_status(struct backlight_device *bl)
 	if (bl->props.fb_blank != FB_BLANK_UNBLANK)
 		brightness = 0;
 
+	if (tbl->notify)
+		brightness = tbl->notify(tbl->dev, brightness);
+
 	if (brightness > max)
 		dev_err(&bl->dev, "Invalid brightness value: %d max: %d\n",
 		brightness, max);
 
+#if defined(CONFIG_ARCH_TEGRA_2x_SOC)
 	/* map API brightness range from (0~255) to hw range (0~128) */
 	tbl->params.duty_cycle = (brightness * 128) / 255;
+#else
+	tbl->params.duty_cycle = brightness & 0xFF;
+#endif
 
 	/* Call tegra display controller function to update backlight */
 	dc = tegra_dc_get_dc(tbl->which_dc);
@@ -63,9 +72,17 @@ static int tegra_pwm_backlight_get_brightness(struct backlight_device *bl)
 	return bl->props.brightness;
 }
 
+static int tegra_pwm_backlight_check_fb(struct backlight_device *bl,
+					struct fb_info *info)
+{
+	struct tegra_pwm_bl_data *tbl = dev_get_drvdata(&bl->dev);
+	return !tbl->check_fb || tbl->check_fb(tbl->dev, info);
+}
+
 static const struct backlight_ops tegra_pwm_backlight_ops = {
 	.update_status	= tegra_pwm_backlight_update_status,
 	.get_brightness	= tegra_pwm_backlight_get_brightness,
+	.check_fb	= tegra_pwm_backlight_check_fb,
 };
 
 static int tegra_pwm_backlight_probe(struct platform_device *pdev)
@@ -91,12 +108,17 @@ static int tegra_pwm_backlight_probe(struct platform_device *pdev)
 
 	tbl->dev = &pdev->dev;
 	tbl->which_dc = data->which_dc;
+	tbl->notify = data->notify;
+	tbl->check_fb = data->check_fb;
 	tbl->params.which_pwm = data->which_pwm;
+	tbl->params.gpio_conf_to_sfio = data->gpio_conf_to_sfio;
+	tbl->params.switch_to_sfio = data->switch_to_sfio;
 	tbl->params.period = data->period;
 	tbl->params.clk_div = data->clk_div;
 	tbl->params.clk_select = data->clk_select;
 
 	memset(&props, 0, sizeof(struct backlight_properties));
+	props.type = BACKLIGHT_RAW;
 	props.max_brightness = data->max_brightness;
 	bl = backlight_device_register(dev_name(&pdev->dev), &pdev->dev, tbl,
 			&tegra_pwm_backlight_ops, &props);
@@ -141,7 +163,7 @@ static int __init tegra_pwm_backlight_init(void)
 {
 	return platform_driver_register(&tegra_pwm_backlight_driver);
 }
-module_init(tegra_pwm_backlight_init);
+late_initcall(tegra_pwm_backlight_init);
 
 static void __exit tegra_pwm_backlight_exit(void)
 {

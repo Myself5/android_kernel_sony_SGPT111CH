@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * ius006.c - ius006 sensor driver
  *
@@ -27,11 +27,12 @@
 #include <media/ius006.h>
 #include <media/tc35892.h>
 #include <linux/crc16.h>
-#include <mach/tegra2_fuse.h>
+#include <mach/tegra_odm_fuses.h>
 #include <mach/gpio.h>
 #include <../gpio-names.h>
 #include <linux/time.h>
 #include <media/tegra_camera.h>
+
 
 #define GPIO_PIN_5M_28V         TEGRA_GPIO_PL0
 #define GPIO_PIN_5M_18V         TEGRA_GPIO_PL1
@@ -70,7 +71,7 @@ u32 otp1h = 0x0;
 #define IUS006_TABLE_WAIT_MS 0
 #define IUS006_TABLE_END     1
 #define IUS006_MAX_RETRIES   3
-#define INTSTS0_MAX_RETRIES  500
+#define INTSTS0_MAX_RETRIES  200
 #define SEQUENCE_END         (0xFFFF)
 
 #define REG_MODESEL         0x0011
@@ -149,10 +150,20 @@ u32 otp1h = 0x0;
 #define IUS006_VIDEO_MODE           1
 
 /*
- * is_video_mode =0, set PLL_CLK to 648MHz for still,
- * is_video_mode =1, set PLL_CLK to 432MHz for video.
+ * is_ius006_video_mode =IUS006_STILL_MODE, set PLL_CLK to 648MHz for still,
+ * is_ius006_video_mode =IUS006_VIDEO_MODE, set PLL_CLK to 432MHz for video.
  */
-u32 is_video_mode = 0;
+bool is_ius006_video_mode = IUS006_STILL_MODE;
+
+
+#define IUS006_VIDEO_CHAT_OFF          0
+#define IUS006_VIDEO_CHAT_ON           1
+/*
+ * is_ius006_video_chat = IUS006_VIDEO_CHAT_OFF, Camera device should not appy customized settings for video chat.
+ * is_ius006_video_chat = IUS006_VIDEO_CHAT_ON, Camera device should appy customized settings for video chat.
+ */
+bool is_ius006_video_chat = IUS006_VIDEO_CHAT_OFF;
+
 
 u32 af_pos_inf =0x00AF;
 u32 af_pos_15 =0x00AF;
@@ -3825,6 +3836,7 @@ static int ius006_InitialSetting_1(struct i2c_client *client)
     }while(err != 0);
 
     do {        
+        msleep(10);
         err =  ius006_read8(client, 0xF8, &data);
         if(err != 0)
         {
@@ -3852,6 +3864,7 @@ static int ius006_InitialSetting_1(struct i2c_client *client)
     udelay(300);
 
     do {        
+        msleep(10);
         err =  ius006_read8(client, 0xF8, &data);
         if(err != 0)
         {
@@ -3930,9 +3943,10 @@ static int ius006_InitialSetting_2(struct i2c_client *client)
 {       
     int status = 0;    
     printk("Enter %s\n", __func__); 
-    printk("!!!!! %s is_video_mode = %d\n", __func__, is_video_mode); 
+    printk("!!!!! %s is_ius006_video_mode = %d\n", __func__, is_ius006_video_mode); 
 
-    status = ius006_WriteI2CSequence(client, is_video_mode == IUS006_VIDEO_MODE ? g_InitialSetting_PLL432_2 : g_InitialSetting_PLL648_2);
+    status = ius006_WriteI2CSequence(client, is_ius006_video_chat == IUS006_VIDEO_CHAT_ON ? g_InitialSetting_PLL432_2 :
+            (is_ius006_video_mode == IUS006_VIDEO_MODE ? g_InitialSetting_PLL432_2 : g_InitialSetting_PLL648_2));
     if(status != 0)
     {
         printk("ius006_InitialSetting_2 failed\n");
@@ -4024,13 +4038,17 @@ static int ius006_InitialSetting_4(struct i2c_client *client)
     af_pos_30 =(u16)(((DAC1m-DACoffset)*(z10cm-z1m)+(z30cm-z1m)*(DAC10cm-DAC1m))/(z10cm-z1m));
 
 //    printk("Inf...=%#x,15...=%#x,30...=%#x\n",af_pos_inf,af_pos_15,af_pos_30);
-
-    if (is_video_mode == IUS006_VIDEO_MODE){
-        g_InitialSetting_4[1770].val = 0x2c24;
-        g_InitialSetting_4[1774].val = 0x0257;
-    }else if(is_video_mode == IUS006_STILL_MODE){
-        g_InitialSetting_4[1770].val = 0x2976;
-        g_InitialSetting_4[1774].val = 0x025c;
+    if (is_ius006_video_chat == IUS006_VIDEO_CHAT_ON){
+            g_InitialSetting_4[1770].val = 0x2c24;
+            g_InitialSetting_4[1774].val = 0x0257;
+    }else{
+        if (is_ius006_video_mode == IUS006_VIDEO_MODE){
+            g_InitialSetting_4[1770].val = 0x2c24;
+            g_InitialSetting_4[1774].val = 0x0257;
+        }else if(is_ius006_video_mode == IUS006_STILL_MODE){
+            g_InitialSetting_4[1770].val = 0x2976;
+            g_InitialSetting_4[1774].val = 0x025c;
+        }
     }
 
     g_InitialSetting_4[1792].val =(u16)(Frange*VCMslope/100);//af_search_offset
@@ -4089,7 +4107,8 @@ static int ius006_InitialSetting_5(struct i2c_client *client)
     int status = 0;    
 //    printk("Enter %s\n", __func__); 
 
-    status = ius006_WriteI2CSequence(client, is_video_mode == IUS006_VIDEO_MODE ? g_InitialSetting_5_video : g_InitialSetting_5_still);
+    status = ius006_WriteI2CSequence(client, is_ius006_video_chat == IUS006_VIDEO_CHAT_ON ? g_InitialSetting_5_video :
+            (is_ius006_video_mode == IUS006_VIDEO_MODE ? g_InitialSetting_5_video : g_InitialSetting_5_still));
     if (status)
     {
         printk("ius006_InitialSetting_5 failed\n");
@@ -4333,6 +4352,7 @@ static int ius006_set_mode(struct ius006_info *info, struct ius006_mode *mode)
             ius006_WriteRegister8(info->i2c_client, REG_MODESEL, MODE_MONITORING);
         }
         do{
+            msleep(10);
             status = ius006_read8(info->i2c_client, REG_INTSTS0, &data);
             if(status == 0)
             {
@@ -4362,6 +4382,7 @@ static int ius006_set_mode(struct ius006_info *info, struct ius006_mode *mode)
             ius006_WriteRegister8(info->i2c_client, REG_INTCLR0,0x12);
             ius006_WriteRegister8(info->i2c_client, REG_MODESEL, MODE_HALFRELEASE);
             do{
+                msleep(10);
                 status = ius006_read8(info->i2c_client, REG_INTSTS0, &data);
                 if(status == 0)
                 {
@@ -4393,6 +4414,7 @@ static int ius006_set_mode(struct ius006_info *info, struct ius006_mode *mode)
 
         ius006_WriteRegister8(info->i2c_client, REG_MODESEL, MODE_CAPTURE);
         do{
+            msleep(10);
             status = ius006_read8(info->i2c_client, REG_INTSTS0, &data);
             if(status == 0)
             {
@@ -4427,6 +4449,7 @@ static int ius006_set_mode(struct ius006_info *info, struct ius006_mode *mode)
             ius006_WriteRegister8(info->i2c_client, REG_MODESEL, MODE_MONITORING);
         }
         do{
+            msleep(10);
             status = ius006_read8(info->i2c_client, REG_INTSTS0, &data);
             if(status == 0)
             {
@@ -4458,6 +4481,10 @@ static int ius006_set_fps(struct ius006_info *info, u8 fps)
 {
 //    int status = 0;
     printk("%s,   fps =%d\n",__func__,fps);
+    if (is_ius006_video_chat == IUS006_VIDEO_CHAT_ON){
+        fps_value = 3;
+        return 0;
+    }
     switch(fps){
         case 30:
             fps_value = 2;
@@ -4499,6 +4526,7 @@ static int ius006_set_af(struct ius006_info *info, u32 af)
 
                 ius006_WriteRegister8(info->i2c_client, REG_MONI_REFLESH, 0x01);
                 do{
+                    msleep(10);
                     status = ius006_read8(info->i2c_client, REG_INTSTS0, &data);
                     if(status == 0)
                     {
@@ -4519,6 +4547,7 @@ static int ius006_set_af(struct ius006_info *info, u32 af)
                 ius006_WriteRegister16(info->i2c_client, REG_MANUAL_POS, af_pos_inf);
                 ius006_WriteRegister8(info->i2c_client, REG_MANUAL_GO, 0x01);
                 do{
+                    msleep(10);
                     status = ius006_read8(info->i2c_client, REG_INTSTS0, &data);
                     if(status == 0)
                     {
@@ -4558,6 +4587,7 @@ static int ius006_set_af(struct ius006_info *info, u32 af)
 
                 ius006_WriteRegister8(info->i2c_client, REG_MONI_REFLESH, 0x01);
                 do{
+                    msleep(10);
                     status = ius006_read8(info->i2c_client, REG_INTSTS0, &data);
                     if(status == 0)
                     {
@@ -4579,6 +4609,7 @@ static int ius006_set_af(struct ius006_info *info, u32 af)
                 ius006_WriteRegister8(info->i2c_client, REG_MANUAL_GO, 0x01);
 
                 do{
+                    msleep(10);
                     status = ius006_read8(info->i2c_client, REG_INTSTS0, &data);
                     if(status == 0)
                     {
@@ -4647,6 +4678,7 @@ static int ius006_set_af(struct ius006_info *info, u32 af)
                     ius006_WriteRegister8(info->i2c_client, REG_MODESEL, MODE_MONITORING);
                 }
                 do{
+                    msleep(10);
                     status = ius006_read8(info->i2c_client, REG_INTSTS0, &data);
                     if(status == 0)
                     {
@@ -4846,7 +4878,8 @@ static int ius006_set_scene(struct ius006_info *info, u32 scene)
     printk("fun=%s  scene=%d\n",__func__,scene);
     switch(scene){
         case IUS006_SCENE_NORMAL:
-            status = ius006_WriteI2CSequence(info->i2c_client, is_video_mode == IUS006_VIDEO_MODE ? ius006_scene_auto_video : ius006_scene_auto_still);
+            status = ius006_WriteI2CSequence(info->i2c_client, is_ius006_video_chat == IUS006_VIDEO_CHAT_ON ? ius006_scene_auto_video : 
+                    (is_ius006_video_mode == IUS006_VIDEO_MODE ? ius006_scene_auto_video : ius006_scene_auto_still));
             if(status != 0)
             {
                 return status;
@@ -4858,7 +4891,8 @@ static int ius006_set_scene(struct ius006_info *info, u32 scene)
             }
             break;
         case IUS006_SCENE_LANDSCAPE:
-            status = ius006_WriteI2CSequence(info->i2c_client, is_video_mode == IUS006_VIDEO_MODE ? ius006_scene_landscape_video : ius006_scene_landscape_still);
+            status = ius006_WriteI2CSequence(info->i2c_client, is_ius006_video_chat == IUS006_VIDEO_CHAT_ON ? ius006_scene_landscape_video :
+                    (is_ius006_video_mode == IUS006_VIDEO_MODE ? ius006_scene_landscape_video : ius006_scene_landscape_still));
             if(status != 0)
             {
                 return status;
@@ -4870,7 +4904,8 @@ static int ius006_set_scene(struct ius006_info *info, u32 scene)
             }
             break;
         case IUS006_SCENE_PORTRAIT:
-            status = ius006_WriteI2CSequence(info->i2c_client, is_video_mode == IUS006_VIDEO_MODE ? ius006_scene_portrait_video : ius006_scene_portrait_still);
+            status = ius006_WriteI2CSequence(info->i2c_client, is_ius006_video_chat == IUS006_VIDEO_CHAT_ON ? ius006_scene_portrait_video :
+                    (is_ius006_video_mode == IUS006_VIDEO_MODE ? ius006_scene_portrait_video : ius006_scene_portrait_still));
             if(status != 0)
             {
                 return status;
@@ -4882,7 +4917,8 @@ static int ius006_set_scene(struct ius006_info *info, u32 scene)
             }
             break;
         case IUS006_SCENE_BEACH_SNOW:
-            status = ius006_WriteI2CSequence(info->i2c_client, is_video_mode == IUS006_VIDEO_MODE ? ius006_scene_beach_snow_video : ius006_scene_beach_snow_still);
+            status = ius006_WriteI2CSequence(info->i2c_client, is_ius006_video_chat == IUS006_VIDEO_CHAT_ON ? ius006_scene_beach_snow_video :
+                    (is_ius006_video_mode == IUS006_VIDEO_MODE ? ius006_scene_beach_snow_video : ius006_scene_beach_snow_still));
             if(status != 0)
             {
                 return status;
@@ -4894,7 +4930,8 @@ static int ius006_set_scene(struct ius006_info *info, u32 scene)
             }
             break;
         case IUS006_SCENE_SPORTS:
-            status = ius006_WriteI2CSequence(info->i2c_client, is_video_mode == IUS006_VIDEO_MODE ? ius006_scene_sports_video : ius006_scene_sports_still);
+            status = ius006_WriteI2CSequence(info->i2c_client, is_ius006_video_chat == IUS006_VIDEO_CHAT_ON ? ius006_scene_sports_video :
+                    (is_ius006_video_mode == IUS006_VIDEO_MODE ? ius006_scene_sports_video : ius006_scene_sports_still));
             if(status != 0)
             {
                 return status;
@@ -4912,10 +4949,18 @@ static int ius006_set_scene(struct ius006_info *info, u32 scene)
     return 0;
 }
 
-static int ius006_set_video_mode(struct ius006_info *info, u32 data)
+static int ius006_set_video_mode(struct ius006_info *info, bool data)
 {
-    is_video_mode = data;
-    printk("fun=%s  is_video_mode=%d\n",__func__,is_video_mode);
+    is_ius006_video_mode = data;
+    printk("fun=%s  is_ius006_video_mode=%d\n",__func__,is_ius006_video_mode);
+
+    return 0;
+}
+
+static int ius006_set_video_chat(struct ius006_info *info, bool data)
+{
+    is_ius006_video_chat = data;
+    printk("fun=%s  is_ius006_video_chat=%d\n",__func__,is_ius006_video_chat);
 
     return 0;
 }
@@ -5026,6 +5071,8 @@ static long ius006_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
         return ius006_set_fps(info, (u8)arg);
     case IUS006_IOCTL_SET_VIDEO_MODE:
         return ius006_set_video_mode(info, (bool)arg);
+    case IUS006_IOCTL_SET_VIDEO_CHAT:
+        return ius006_set_video_chat(info, (bool)arg);
     case IUS006_IOCTL_SET_AF:
         return ius006_set_af(info, (u32)arg);
     case IUS006_IOCTL_SET_AWB:
@@ -5107,22 +5154,26 @@ static struct ius006_info *info;
 
 static int ius006_open(struct inode *inode, struct file *file)
 {
-    pr_info("%s, is_video_mode = %d\n", __func__, is_video_mode);
+    pr_info("%s, is_ius006_video_mode = %d\n", __func__, is_ius006_video_mode);
     file->private_data = info;
 #ifdef CONFIG_MACH_NBX03
     nbx03_ius006_power_on();
 #endif
+//    is_ius006_video_mode = IUS006_STILL_MODE;
+//    is_ius006_video_chat = IUS006_VIDEO_CHAT_OFF;
     return 0;
 }
 
 int ius006_release(struct inode *inode, struct file *file)
 {
-    pr_info("%s, is_video_mode = %d\n", __func__, is_video_mode);
-//    is_video_mode = 0;
+    pr_info("%s, is_ius006_video_mode = %d\n", __func__, is_ius006_video_mode);
+//    is_ius006_video_chat = 0;
 #ifdef CONFIG_MACH_NBX03
     nbx03_ius006_power_off();
 #endif
     file->private_data = NULL;
+//    is_ius006_video_mode = IUS006_STILL_MODE;
+//    is_ius006_video_chat = IUS006_VIDEO_CHAT_OFF;
     return 0;
 }
 

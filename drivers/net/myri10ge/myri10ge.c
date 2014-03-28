@@ -225,6 +225,7 @@ struct myri10ge_priv {
 	struct msix_entry *msix_vectors;
 #ifdef CONFIG_MYRI10GE_DCA
 	int dca_enabled;
+	int relaxed_order;
 #endif
 	u32 link_state;
 	unsigned int rdma_tags_available;
@@ -252,7 +253,7 @@ struct myri10ge_priv {
 	unsigned long serial_number;
 	int vendor_specific_offset;
 	int fw_multicast_support;
-	unsigned long features;
+	u32 features;
 	u32 max_tso6;
 	u32 read_dma;
 	u32 write_dma;
@@ -990,7 +991,7 @@ static int myri10ge_reset(struct myri10ge_priv *mgp)
 		 * RX queues, so if we get an error, first retry using a
 		 * single TX queue before giving up */
 		if (status != 0 && mgp->dev->real_num_tx_queues > 1) {
-			mgp->dev->real_num_tx_queues = 1;
+			netif_set_real_num_tx_queues(mgp->dev, 1);
 			cmd.data0 = mgp->num_slices;
 			cmd.data1 = MXGEFW_SLICE_INTR_MODE_ONE_PER_SLICE;
 			status = myri10ge_send_cmd(mgp,
@@ -1074,10 +1075,28 @@ static int myri10ge_reset(struct myri10ge_priv *mgp)
 }
 
 #ifdef CONFIG_MYRI10GE_DCA
+static int myri10ge_toggle_relaxed(struct pci_dev *pdev, int on)
+{
+	int ret, cap, err;
+	u16 ctl;
+
+	cap = pci_find_capability(pdev, PCI_CAP_ID_EXP);
+	if (!cap)
+		return 0;
+
+	err = pci_read_config_word(pdev, cap + PCI_EXP_DEVCTL, &ctl);
+	ret = (ctl & PCI_EXP_DEVCTL_RELAX_EN) >> 4;
+	if (ret != on) {
+		ctl &= ~PCI_EXP_DEVCTL_RELAX_EN;
+		ctl |= (on << 4);
+		pci_write_config_word(pdev, cap + PCI_EXP_DEVCTL, ctl);
+	}
+	return ret;
+}
+
 static void
 myri10ge_write_dca(struct myri10ge_slice_state *ss, int cpu, int tag)
 {
-	ss->cpu = cpu;
 	ss->cached_dca_tag = tag;
 	put_be32(htonl(tag), ss->dca_tag);
 }
@@ -1088,9 +1107,10 @@ static inline void myri10ge_update_dca(struct myri10ge_slice_state *ss)
 	int tag;
 
 	if (cpu != ss->cpu) {
-		tag = dca_get_tag(cpu);
+		tag = dca3_get_tag(&ss->mgp->pdev->dev, cpu);
 		if (ss->cached_dca_tag != tag)
 			myri10ge_write_dca(ss, cpu, tag);
+		ss->cpu = cpu;
 	}
 	put_cpu();
 }
@@ -1113,9 +1133,13 @@ static void myri10ge_setup_dca(struct myri10ge_priv *mgp)
 				"dca_add_requester() failed, err=%d\n", err);
 		return;
 	}
+	mgp->relaxed_order = myri10ge_toggle_relaxed(pdev, 0);
 	mgp->dca_enabled = 1;
-	for (i = 0; i < mgp->num_slices; i++)
-		myri10ge_write_dca(&mgp->ss[i], -1, 0);
+	for (i = 0; i < mgp->num_slices; i++) {
+		mgp->ss[i].cpu = -1;
+		mgp->ss[i].cached_dca_tag = -1;
+		myri10ge_update_dca(&mgp->ss[i]);
+	 }
 }
 
 static void myri10ge_teardown_dca(struct myri10ge_priv *mgp)
@@ -1126,6 +1150,8 @@ static void myri10ge_teardown_dca(struct myri10ge_priv *mgp)
 	if (!mgp->dca_enabled)
 		return;
 	mgp->dca_enabled = 0;
+	if (mgp->relaxed_order)
+		myri10ge_toggle_relaxed(pdev, 1);
 	err = dca_remove_requester(&pdev->dev);
 }
 
@@ -1286,16 +1312,25 @@ myri10ge_unmap_rx_page(struct pci_dev *pdev,
 				 * page into an skb */
 
 static inline int
-myri10ge_rx_done(struct myri10ge_slice_state *ss, struct myri10ge_rx_buf *rx,
-		 int bytes, int len, __wsum csum)
+myri10ge_rx_done(struct myri10ge_slice_state *ss, int len, __wsum csum,
+		 int lro_enabled)
 {
 	struct myri10ge_priv *mgp = ss->mgp;
 	struct sk_buff *skb;
 	struct skb_frag_struct rx_frags[MYRI10GE_MAX_FRAGS_PER_FRAME];
-	int i, idx, hlen, remainder;
+	struct myri10ge_rx_buf *rx;
+	int i, idx, hlen, remainder, bytes;
 	struct pci_dev *pdev = mgp->pdev;
 	struct net_device *dev = mgp->dev;
 	u8 *va;
+
+	if (len <= mgp->small_bytes) {
+		rx = &ss->rx_small;
+		bytes = mgp->small_bytes;
+	} else {
+		rx = &ss->rx_big;
+		bytes = mgp->big_bytes;
+	}
 
 	len += MXGEFW_PAD;
 	idx = rx->cnt & rx->mask;
@@ -1315,7 +1350,7 @@ myri10ge_rx_done(struct myri10ge_slice_state *ss, struct myri10ge_rx_buf *rx,
 		remainder -= MYRI10GE_ALLOC_SIZE;
 	}
 
-	if (dev->features & NETIF_F_LRO) {
+	if (lro_enabled) {
 		rx_frags[0].page_offset += MXGEFW_PAD;
 		rx_frags[0].size -= MXGEFW_PAD;
 		len -= MXGEFW_PAD;
@@ -1437,7 +1472,7 @@ myri10ge_clean_rx_done(struct myri10ge_slice_state *ss, int budget)
 {
 	struct myri10ge_rx_done *rx_done = &ss->rx_done;
 	struct myri10ge_priv *mgp = ss->mgp;
-	struct net_device *netdev = mgp->dev;
+
 	unsigned long rx_bytes = 0;
 	unsigned long rx_packets = 0;
 	unsigned long rx_ok;
@@ -1448,18 +1483,18 @@ myri10ge_clean_rx_done(struct myri10ge_slice_state *ss, int budget)
 	u16 length;
 	__wsum checksum;
 
+	/*
+	 * Prevent compiler from generating more than one ->features memory
+	 * access to avoid theoretical race condition with functions that
+	 * change NETIF_F_LRO flag at runtime.
+	 */
+	bool lro_enabled = ACCESS_ONCE(mgp->dev->features) & NETIF_F_LRO;
+
 	while (rx_done->entry[idx].length != 0 && work_done < budget) {
 		length = ntohs(rx_done->entry[idx].length);
 		rx_done->entry[idx].length = 0;
 		checksum = csum_unfold(rx_done->entry[idx].checksum);
-		if (length <= mgp->small_bytes)
-			rx_ok = myri10ge_rx_done(ss, &ss->rx_small,
-						 mgp->small_bytes,
-						 length, checksum);
-		else
-			rx_ok = myri10ge_rx_done(ss, &ss->rx_big,
-						 mgp->big_bytes,
-						 length, checksum);
+		rx_ok = myri10ge_rx_done(ss, length, checksum, lro_enabled);
 		rx_packets += rx_ok;
 		rx_bytes += rx_ok * (unsigned long)length;
 		cnt++;
@@ -1471,7 +1506,7 @@ myri10ge_clean_rx_done(struct myri10ge_slice_state *ss, int budget)
 	ss->stats.rx_packets += rx_packets;
 	ss->stats.rx_bytes += rx_bytes;
 
-	if (netdev->features & NETIF_F_LRO)
+	if (lro_enabled)
 		lro_flush_all(&rx_done->lro_mgr);
 
 	/* restock receive rings if needed */
@@ -1555,12 +1590,12 @@ static irqreturn_t myri10ge_intr(int irq, void *arg)
 	 * valid  since MSI-X irqs are not shared */
 	if ((mgp->dev->real_num_tx_queues == 1) && (ss != mgp->ss)) {
 		napi_schedule(&ss->napi);
-		return (IRQ_HANDLED);
+		return IRQ_HANDLED;
 	}
 
 	/* make sure it is our IRQ, and that the DMA has finished */
 	if (unlikely(!stats->valid))
-		return (IRQ_NONE);
+		return IRQ_NONE;
 
 	/* low bit indicates receives are present, so schedule
 	 * napi poll handler */
@@ -1599,7 +1634,7 @@ static irqreturn_t myri10ge_intr(int irq, void *arg)
 		myri10ge_check_statblock(mgp);
 
 	put_be32(htonl(3), ss->irq_claim + 1);
-	return (IRQ_HANDLED);
+	return IRQ_HANDLED;
 }
 
 static int
@@ -1750,7 +1785,7 @@ static int myri10ge_set_rx_csum(struct net_device *netdev, u32 csum_enabled)
 static int myri10ge_set_tso(struct net_device *netdev, u32 tso_enabled)
 {
 	struct myri10ge_priv *mgp = netdev_priv(netdev);
-	unsigned long flags = mgp->features & (NETIF_F_TSO6 | NETIF_F_TSO);
+	u32 flags = mgp->features & (NETIF_F_TSO6 | NETIF_F_TSO);
 
 	if (tso_enabled)
 		netdev->features |= flags;
@@ -2710,7 +2745,7 @@ again:
 	odd_flag = 0;
 	flags = (MXGEFW_FLAGS_NO_TSO | MXGEFW_FLAGS_FIRST);
 	if (likely(skb->ip_summed == CHECKSUM_PARTIAL)) {
-		cksum_offset = skb_transport_offset(skb);
+		cksum_offset = skb_checksum_start_offset(skb);
 		pseudo_hdr_offset = cksum_offset + skb->csum_offset;
 		/* If the headers are excessively large, then we must
 		 * fall back to a software checksum */
@@ -3377,9 +3412,7 @@ static int myri10ge_resume(struct pci_dev *pdev)
 		return -EIO;
 	}
 
-	status = pci_restore_state(pdev);
-	if (status)
-		return status;
+	pci_restore_state(pdev);
 
 	status = pci_enable_device(pdev);
 	if (status) {
@@ -3621,6 +3654,7 @@ static void myri10ge_free_slices(struct myri10ge_priv *mgp)
 			dma_free_coherent(&pdev->dev, bytes,
 					  ss->fw_stats, ss->fw_stats_bus);
 			ss->fw_stats = NULL;
+			netif_napi_del(&ss->napi);
 		}
 	}
 	kfree(mgp->ss);
@@ -3668,7 +3702,7 @@ abort:
 
 /*
  * This function determines the number of slices supported.
- * The number slices is the minumum of the number of CPUS,
+ * The number slices is the minimum of the number of CPUS,
  * the number of MSI-X irqs supported, the number of slices
  * supported by the firmware
  */
@@ -3753,8 +3787,8 @@ static void myri10ge_probe_slices(struct myri10ge_priv *mgp)
 	 * slices. We give up on MSI-X if we can only get a single
 	 * vector. */
 
-	mgp->msix_vectors = kzalloc(mgp->num_slices *
-				    sizeof(*mgp->msix_vectors), GFP_KERNEL);
+	mgp->msix_vectors = kcalloc(mgp->num_slices, sizeof(*mgp->msix_vectors),
+				    GFP_KERNEL);
 	if (mgp->msix_vectors == NULL)
 		goto disable_msix;
 	for (i = 0; i < mgp->num_slices; i++) {
@@ -3923,7 +3957,8 @@ static int myri10ge_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		dev_err(&pdev->dev, "failed to alloc slice state\n");
 		goto abort_with_firmware;
 	}
-	netdev->real_num_tx_queues = mgp->num_slices;
+	netif_set_real_num_tx_queues(netdev, mgp->num_slices);
+	netif_set_real_num_rx_queues(netdev, mgp->num_slices);
 	status = myri10ge_reset(mgp);
 	if (status != 0) {
 		dev_err(&pdev->dev, "failed reset\n");
@@ -4040,7 +4075,7 @@ static void myri10ge_remove(struct pci_dev *pdev)
 	if (mgp == NULL)
 		return;
 
-	flush_scheduled_work();
+	cancel_work_sync(&mgp->watchdog_work);
 	netdev = mgp->dev;
 	unregister_netdev(netdev);
 

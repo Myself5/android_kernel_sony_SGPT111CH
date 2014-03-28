@@ -137,4 +137,13 @@ static inline void finv_buffer(void *buffer, size_t size)
 	mb_incoherent();
 }
 
+/*
+ * Flush and invalidate a VA range that is homed remotely, waiting
+ * until the memory controller holds the flushed values.  If "hfh" is
+ * true, we will do a more expensive flush involving additional loads
+ * to make sure we have touched all the possible home cpus of a buffer
+ * that is homed with "hash for home".
+ */
+void finv_buffer_remote(void *buffer, size_t size, int hfh);
+
 #endif /* _ASM_TILE_CACHEFLUSH_H */

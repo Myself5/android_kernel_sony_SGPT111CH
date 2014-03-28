@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * Copyright (C) 2011 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
@@ -41,7 +41,7 @@ static int wireless_power_flag = 0;
 #define GPIO_BT_RST_N          TEGRA_GPIO_PP1
 
 // GPS_PWR_EN       GPIO_PP0
-//#define GPIO_GPS_PWR_EN        TEGRA_GPIO_PP0
+#define GPIO_GPS_PWR_EN        TEGRA_GPIO_PP0
 
 // WWAN_PWR_EN      GPIO_PV1
 #define GPIO_WWAN_PWR_EN       TEGRA_GPIO_PV1
@@ -51,13 +51,13 @@ static int wireless_power_flag = 0;
 
 static bool s_hWlanChipPwdN_Pin;
 static bool s_hBtRstN_Pin;
-//static bool s_hGpsPwrEn_Pin;
+static bool s_hGpsPwrEn_Pin;
 static bool s_hWWanPwrEn_Pin;
 static bool s_hWWanRfOnN_Pin;
 
 static int s_wifi_onoff = 0;
 static int s_bt_onoff = 0;
-//static int s_gps_onoff = 0;
+static int s_gps_onoff = 0;
 static int s_wwan_onoff = 0;      // initial off
 static int s_wwan_rf_onoff = 0;   // initial off
 
@@ -115,6 +115,19 @@ static int init(void)
 			ret = nbx02_gpio_request(port, "BtRstN", GPIODIRECTION_OUT, value);
 			if (ret < 0) {
 				PRINT_WIRELESSPOWER(("fail:s_hBtRstN_Pin = nbx02_gpio_request( s_hGpio, port, pin );\n"));
+				return ret;
+			}
+		}
+		gpio_set_value(port, value);
+	}
+	
+	{
+		int port = GPIO_GPS_PWR_EN;
+		int value = (s_gps_onoff ? 1 : 0);  // gps power enable
+		if (s_hGpsPwrEn_Pin == false) {
+			ret = nbx02_gpio_request(port, "GpsPwrEn", GPIODIRECTION_OUT, value);
+			if (ret < 0) {
+				PRINT_WIRELESSPOWER(("fail:s_hGpsPwrEn_Pin = nbx02_gpio_request( s_hGpio, port, pin );\n"));
 				return ret;
 			}
 		}
@@ -204,6 +217,27 @@ static int bluetooth_powercontrol(int on_off)
 
 static int gps_powercontrol(int on_off)
 {
+	PRINT_WIRELESSPOWER(("in gps_powercontrol on_off=%d\n", on_off));
+	
+	if (on_off == 1){
+		/*RESET*/
+		gpio_set_value(GPIO_GPS_PWR_EN, 0);  // gps power enable
+		msleep(20);
+		/*PWR_ON*/
+		gpio_set_value(GPIO_GPS_PWR_EN, 1);  // gps power enable
+		/*SAVE*/
+		s_gps_onoff = 1;
+		return 0;
+	}
+	
+	if (on_off == 0){
+		/*RESET*/
+		gpio_set_value(GPIO_GPS_PWR_EN, 0);  // gps power enable
+		/*SAVE*/
+		s_gps_onoff = 0;
+		return 0;
+	}
+	
 	return -EINVAL;
 }
 
@@ -236,7 +270,7 @@ static int wwan_powercontrol(int on_off)
 static int wwan_rf_powercontrol(int on_off)
 {
 	PRINT_WIRELESSPOWER(("in wwan_rf_powercontrol on_off=%d\n", on_off));
-
+	
 	if (on_off == 1){
 		/*RESET*/
 		gpio_set_value(GPIO_WWAN_RF_ON_N, 1);  // wwan rf on _N
@@ -273,7 +307,8 @@ static int bluetooth_powerstatus(int *p_on_off)
 
 static int gps_powerstatus(int *p_on_off)
 {
-	return -EINVAL;
+	(*p_on_off) = s_gps_onoff;
+	return 0;
 }
 
 static int wwan_powerstatus(int *p_on_off)

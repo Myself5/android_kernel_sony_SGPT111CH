@@ -104,6 +104,7 @@ static int lbs_dev_open(struct net_device *dev)
 	lbs_deb_enter(LBS_DEB_NET);
 
 	spin_lock_irq(&priv->driver_lock);
+	priv->stopping = false;
 
 	if (priv->connect_status == LBS_CONNECTED)
 		netif_carrier_on(dev);
@@ -131,10 +132,16 @@ static int lbs_eth_stop(struct net_device *dev)
 	lbs_deb_enter(LBS_DEB_NET);
 
 	spin_lock_irq(&priv->driver_lock);
+	priv->stopping = true;
 	netif_stop_queue(dev);
 	spin_unlock_irq(&priv->driver_lock);
 
 	schedule_work(&priv->mcast_work);
+	cancel_delayed_work_sync(&priv->scan_work);
+	if (priv->scan_req) {
+		cfg80211_scan_done(priv->scan_req, false);
+		priv->scan_req = NULL;
+	}
 
 	lbs_deb_leave(LBS_DEB_NET);
 	return 0;
@@ -532,6 +539,43 @@ static int lbs_thread(void *data)
 	return 0;
 }
 
+/**
+ * @brief This function gets the HW spec from the firmware and sets
+ *        some basic parameters.
+ *
+ *  @param priv    A pointer to struct lbs_private structure
+ *  @return        0 or -1
+ */
+static int lbs_setup_firmware(struct lbs_private *priv)
+{
+	int ret = -1;
+	s16 curlevel = 0, minlevel = 0, maxlevel = 0;
+
+	lbs_deb_enter(LBS_DEB_FW);
+
+	/* Read MAC address from firmware */
+	memset(priv->current_addr, 0xff, ETH_ALEN);
+	ret = lbs_update_hw_spec(priv);
+	if (ret)
+		goto done;
+
+	/* Read power levels if available */
+	ret = lbs_get_tx_power(priv, &curlevel, &minlevel, &maxlevel);
+	if (ret == 0) {
+		priv->txpower_cur = curlevel;
+		priv->txpower_min = minlevel;
+		priv->txpower_max = maxlevel;
+	}
+
+	/* Send cmd to FW to enable 11D function */
+	ret = lbs_set_snmp_mib(priv, SNMP_MIB_OID_11D_ENABLE, 1);
+
+	lbs_set_mac_control(priv);
+done:
+	lbs_deb_leave_args(LBS_DEB_FW, "ret %d", ret);
+	return ret;
+}
+
 int lbs_suspend(struct lbs_private *priv)
 {
 	int ret;
@@ -577,47 +621,13 @@ int lbs_resume(struct lbs_private *priv)
 			lbs_pr_err("deep sleep activation failed: %d\n", ret);
 	}
 
+	if (priv->setup_fw_on_resume)
+		ret = lbs_setup_firmware(priv);
+
 	lbs_deb_leave_args(LBS_DEB_FW, "ret %d", ret);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(lbs_resume);
-
-/**
- * @brief This function gets the HW spec from the firmware and sets
- *        some basic parameters.
- *
- *  @param priv    A pointer to struct lbs_private structure
- *  @return 	   0 or -1
- */
-static int lbs_setup_firmware(struct lbs_private *priv)
-{
-	int ret = -1;
-	s16 curlevel = 0, minlevel = 0, maxlevel = 0;
-
-	lbs_deb_enter(LBS_DEB_FW);
-
-	/* Read MAC address from firmware */
-	memset(priv->current_addr, 0xff, ETH_ALEN);
-	ret = lbs_update_hw_spec(priv);
-	if (ret)
-		goto done;
-
-	/* Read power levels if available */
-	ret = lbs_get_tx_power(priv, &curlevel, &minlevel, &maxlevel);
-	if (ret == 0) {
-		priv->txpower_cur = curlevel;
-		priv->txpower_min = minlevel;
-		priv->txpower_max = maxlevel;
-	}
-
-	/* Send cmd to FW to enable 11D function */
-	ret = lbs_set_snmp_mib(priv, SNMP_MIB_OID_11D_ENABLE, 1);
-
-	lbs_set_mac_control(priv);
-done:
-	lbs_deb_leave_args(LBS_DEB_FW, "ret %d", ret);
-	return ret;
-}
 
 /**
  *  This function handles the timeout of command sending.
@@ -844,9 +854,10 @@ struct lbs_private *lbs_add_card(void *card, struct device *dmdev)
 	priv->work_thread = create_singlethread_workqueue("lbs_worker");
 	INIT_WORK(&priv->mcast_work, lbs_set_mcast_worker);
 
-	priv->wol_criteria = 0xffffffff;
+	priv->wol_criteria = EHS_REMOVE_WAKEUP;
 	priv->wol_gpio = 0xff;
 	priv->wol_gap = 20;
+	priv->ehs_remove_supported = true;
 
 	goto done;
 
@@ -908,8 +919,6 @@ void lbs_remove_card(struct lbs_private *priv)
 
 	lbs_free_adapter(priv);
 	lbs_cfg_free(priv);
-
-	priv->dev = NULL;
 	free_netdev(dev);
 
 	lbs_deb_leave(LBS_DEB_MAIN);
@@ -1046,6 +1055,111 @@ void lbs_notify_command_response(struct lbs_private *priv, u8 resp_idx)
 	lbs_deb_leave(LBS_DEB_THREAD);
 }
 EXPORT_SYMBOL_GPL(lbs_notify_command_response);
+
+/**
+ *  @brief Retrieves two-stage firmware
+ *
+ *  @param dev     	A pointer to device structure
+ *  @param user_helper	User-defined helper firmware file
+ *  @param user_mainfw	User-defined main firmware file
+ *  @param card_model	Bus-specific card model ID used to filter firmware table
+ *                         elements
+ *  @param fw_table	Table of firmware file names and device model numbers
+ *                         terminated by an entry with a NULL helper name
+ *  @param helper	On success, the helper firmware; caller must free
+ *  @param mainfw	On success, the main firmware; caller must free
+ *
+ *  @return		0 on success, non-zero on failure
+ */
+int lbs_get_firmware(struct device *dev, const char *user_helper,
+			const char *user_mainfw, u32 card_model,
+			const struct lbs_fw_table *fw_table,
+			const struct firmware **helper,
+			const struct firmware **mainfw)
+{
+	const struct lbs_fw_table *iter;
+	int ret;
+
+	BUG_ON(helper == NULL);
+	BUG_ON(mainfw == NULL);
+
+	/* Try user-specified firmware first */
+	if (user_helper) {
+		ret = request_firmware(helper, user_helper, dev);
+		if (ret) {
+			lbs_pr_err("couldn't find helper firmware %s",
+					user_helper);
+			goto fail;
+		}
+	}
+	if (user_mainfw) {
+		ret = request_firmware(mainfw, user_mainfw, dev);
+		if (ret) {
+			lbs_pr_err("couldn't find main firmware %s",
+					user_mainfw);
+			goto fail;
+		}
+	}
+
+	if (*helper && *mainfw)
+		return 0;
+
+	/* Otherwise search for firmware to use.  If neither the helper or
+	 * the main firmware were specified by the user, then we need to
+	 * make sure that found helper & main are from the same entry in
+	 * fw_table.
+	 */
+	iter = fw_table;
+	while (iter && iter->helper) {
+		if (iter->model != card_model)
+			goto next;
+
+		if (*helper == NULL) {
+			ret = request_firmware(helper, iter->helper, dev);
+			if (ret)
+				goto next;
+
+			/* If the device has one-stage firmware (ie cf8305) and
+			 * we've got it then we don't need to bother with the
+			 * main firmware.
+			 */
+			if (iter->fwname == NULL)
+				return 0;
+		}
+
+		if (*mainfw == NULL) {
+			ret = request_firmware(mainfw, iter->fwname, dev);
+			if (ret && !user_helper) {
+				/* Clear the helper if it wasn't user-specified
+				 * and the main firmware load failed, to ensure
+				 * we don't have mismatched firmware pairs.
+				 */
+				release_firmware(*helper);
+				*helper = NULL;
+			}
+		}
+
+		if (*helper && *mainfw)
+			return 0;
+
+  next:
+		iter++;
+	}
+
+  fail:
+	/* Failed */
+	if (*helper) {
+		release_firmware(*helper);
+		*helper = NULL;
+	}
+	if (*mainfw) {
+		release_firmware(*mainfw);
+		*mainfw = NULL;
+	}
+
+	return -ENOENT;
+}
+EXPORT_SYMBOL_GPL(lbs_get_firmware);
 
 static int __init lbs_init_module(void)
 {

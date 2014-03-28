@@ -36,6 +36,7 @@ struct lbs_private {
 	/* CFG80211 */
 	struct wireless_dev *wdev;
 	bool wiphy_registered;
+	bool stopping;
 	struct cfg80211_scan_request *scan_req;
 	u8 assoc_bss[ETH_ALEN];
 	u8 disassoc_reason;
@@ -89,6 +90,7 @@ struct lbs_private {
 	void *card;
 	u8 fw_ready;
 	u8 surpriseremoved;
+	u8 setup_fw_on_resume;
 	int (*hw_host_to_card) (struct lbs_private *priv, u8 type, u8 *payload, u16 nb);
 	void (*reset_card) (struct lbs_private *priv);
 	int (*enter_deep_sleep) (struct lbs_private *priv);
@@ -100,6 +102,7 @@ struct lbs_private {
 	u32 fwcapinfo;
 	u16 regioncode;
 	u8 current_addr[ETH_ALEN];
+	u8 copied_hwaddr;
 
 	/* Command download */
 	u8 dnld_sent;
@@ -137,6 +140,7 @@ struct lbs_private {
 	uint32_t wol_criteria;
 	uint8_t wol_gpio;
 	uint8_t wol_gap;
+	bool ehs_remove_supported;
 
 	/* Transmitting */
 	int tx_pending_len;		/* -1 while building packet */

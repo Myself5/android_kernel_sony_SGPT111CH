@@ -7,6 +7,8 @@
  *	Colin Cross <ccross@google.com>
  *	Erik Gilling <konkers@google.com>
  *
+ * Copyright (C) 2010-2011 NVIDIA Corporation
+ *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
  * may be copied, distributed, and modified under those terms.
@@ -24,30 +26,10 @@
 #include <mach/hardware.h>
 #include <mach/iomap.h>
 
-extern void (*tegra_reset)(char mode, const char *cmd);
+extern void (*arch_reset)(char mode, const char *cmd);
 
 static inline void arch_idle(void)
 {
-}
-
-static inline void tegra_assert_system_reset(void)
-{
-	void __iomem *reset = IO_ADDRESS(TEGRA_PMC_BASE + 0x00);
-	u32 reg;
-
-	reg = readl_relaxed(reset);
-	reg |= 0x10;
-	writel_relaxed(reg, reset);
-}
-
-static inline void arch_reset(char mode, const char *cmd)
-{
-	if (tegra_reset)
-		tegra_reset(mode, cmd);
-	else
-		tegra_assert_system_reset();
-
-	do { } while (1);
 }
 
 #endif

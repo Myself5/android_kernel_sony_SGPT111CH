@@ -21,6 +21,8 @@
 #ifndef __SOUND_HDA_CODEC_H
 #define __SOUND_HDA_CODEC_H
 
+#include <linux/platform_device.h>
+
 #include <sound/info.h>
 #include <sound/control.h>
 #include <sound/pcm.h>
@@ -621,6 +623,7 @@ struct hda_bus_ops {
 struct hda_bus_template {
 	void *private_data;
 	struct pci_dev *pci;
+	struct platform_device *pdev;
 	const char *modelname;
 	int *power_save;
 	struct hda_bus_ops ops;
@@ -866,6 +869,11 @@ struct hda_codec {
 	/* codec-specific additional proc output */
 	void (*proc_widget_hook)(struct snd_info_buffer *buffer,
 				 struct hda_codec *codec, hda_nid_t nid);
+
+#ifdef CONFIG_SND_HDA_INPUT_JACK
+	/* jack detection */
+	struct snd_array jacks;
+#endif
 };
 
 /* direction */
@@ -988,6 +996,18 @@ void snd_hda_bus_reboot_notify(struct hda_bus *bus);
 #ifdef CONFIG_PM
 int snd_hda_suspend(struct hda_bus *bus);
 int snd_hda_resume(struct hda_bus *bus);
+#endif
+
+#ifdef CONFIG_SND_HDA_POWER_SAVE
+static inline
+int hda_call_check_power_status(struct hda_codec *codec, hda_nid_t nid)
+{
+	if (codec->patch_ops.check_power_status)
+		return codec->patch_ops.check_power_status(codec, nid);
+	return 0;
+}
+#else	
+#define hda_call_check_power_status(codec, nid)		0
 #endif
 
 /*

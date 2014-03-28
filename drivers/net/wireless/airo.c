@@ -105,7 +105,7 @@ static struct pci_driver airo_driver = {
    of statistics in the /proc filesystem */
 
 #define IGNLABEL(comment) NULL
-static char *statsLabels[] = {
+static const char *statsLabels[] = {
 	"RxOverrun",
 	IGNLABEL("RxPlcpCrcErr"),
 	IGNLABEL("RxPlcpFormatErr"),
@@ -217,7 +217,6 @@ static char *statsLabels[] = {
    (no spaces) list of rates (up to 8). */
 
 static int rates[8];
-static int basic_rate;
 static char *ssids[3];
 
 static int io[4];
@@ -250,7 +249,6 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_SUPPORTED_DEVICE("Aironet 4500, 4800 and Cisco 340/350");
 module_param_array(io, int, NULL, 0);
 module_param_array(irq, int, NULL, 0);
-module_param(basic_rate, int, 0);
 module_param_array(rates, int, NULL, 0);
 module_param_array(ssids, charp, NULL, 0);
 module_param(auto_wep, int, 0);
@@ -932,7 +930,7 @@ typedef struct aironet_ioctl {
 	unsigned char __user *data;	// d-data
 } aironet_ioctl;
 
-static char swversion[] = "2.1";
+static const char swversion[] = "2.1";
 #endif /* CISCO_EXT */
 
 #define NUM_MODULES       2
@@ -1374,7 +1372,7 @@ static int micsetup(struct airo_info *ai) {
 	return SUCCESS;
 }
 
-static char micsnap[] = {0xAA,0xAA,0x03,0x00,0x40,0x96,0x00,0x02};
+static const u8 micsnap[] = {0xAA,0xAA,0x03,0x00,0x40,0x96,0x00,0x02};
 
 /*===========================================================================
  * Description: Mic a packet
@@ -1886,7 +1884,7 @@ static int airo_open(struct net_device *dev) {
 	/* Make sure the card is configured.
 	 * Wireless Extensions may postpone config changes until the card
 	 * is open (to pipeline changes and speed-up card setup). If
-	 * those changes are not yet commited, do it now - Jean II */
+	 * those changes are not yet committed, do it now - Jean II */
 	if (test_bit(FLAG_COMMIT, &ai->flags)) {
 		disable_MAC(ai, 1);
 		writeConfigRid(ai, 1);
@@ -1994,7 +1992,7 @@ static int mpi_send_packet (struct net_device *dev)
 /*
  * Magic, the cards firmware needs a length count (2 bytes) in the host buffer
  * right after  TXFID_HDR.The TXFID_HDR contains the status short so payloadlen
- * is immediatly after it. ------------------------------------------------
+ * is immediately after it. ------------------------------------------------
  *                         |TXFIDHDR+STATUS|PAYLOADLEN|802.3HDR|PACKETDATA|
  *                         ------------------------------------------------
  */
@@ -2008,7 +2006,7 @@ static int mpi_send_packet (struct net_device *dev)
 		sizeof(wifictlhdr8023) + 2 ;
 
 	/*
-	 * Firmware automaticly puts 802 header on so
+	 * Firmware automatically puts 802 header on so
 	 * we don't need to account for it in the length
 	 */
 	if (test_bit(FLAG_MIC_CAPABLE, &ai->flags) && ai->micstats.enabled &&
@@ -2533,7 +2531,7 @@ static int mpi_init_descriptors (struct airo_info *ai)
 /*
  * We are setting up three things here:
  * 1) Map AUX memory for descriptors: Rid, TxFid, or RxFid.
- * 2) Map PCI memory for issueing commands.
+ * 2) Map PCI memory for issuing commands.
  * 3) Allocate memory (shared) to send and receive ethernet frames.
  */
 static int mpi_map_card(struct airo_info *ai, struct pci_dev *pci)
@@ -2723,9 +2721,8 @@ static int airo_networks_allocate(struct airo_info *ai)
 	if (ai->networks)
 		return 0;
 
-	ai->networks =
-	    kzalloc(AIRO_MAX_NETWORK_COUNT * sizeof(BSSListElement),
-		    GFP_KERNEL);
+	ai->networks = kcalloc(AIRO_MAX_NETWORK_COUNT, sizeof(BSSListElement),
+			       GFP_KERNEL);
 	if (!ai->networks) {
 		airo_print_warn("", "Out of memory allocating beacons");
 		return -ENOMEM;
@@ -3884,15 +3881,6 @@ static u16 setup_card(struct airo_info *ai, u8 *mac, int lock)
 				ai->config.rates[i] = rates[i];
 			}
 		}
-		if ( basic_rate > 0 ) {
-			for( i = 0; i < 8; i++ ) {
-				if ( ai->config.rates[i] == basic_rate ||
-				     !ai->config.rates ) {
-					ai->config.rates[i] = basic_rate | 0x80;
-					break;
-				}
-			}
-		}
 		set_bit (FLAG_COMMIT, &ai->flags);
 	}
 
@@ -3959,7 +3947,7 @@ static u16 issuecommand(struct airo_info *ai, Cmd *pCmd, Resp *pRsp) {
 
 	if ( max_tries == -1 ) {
 		airo_print_err(ai->dev->name,
-			"Max tries exceeded when issueing command");
+			"Max tries exceeded when issuing command");
 		if (IN4500(ai, COMMAND) & COMMAND_BUSY)
 			OUT4500(ai, EVACK, EV_CLEARCOMMANDBUSY);
 		return ERROR;
@@ -4185,7 +4173,7 @@ done:
 }
 
 /*  Note, that we are using BAP1 which is also used by transmit, so
- *  make sure this isnt called when a transmit is happening */
+ *  make sure this isn't called when a transmit is happening */
 static int PC4500_writerid(struct airo_info *ai, u16 rid,
 			   const void *pBuf, int len, int lock)
 {
@@ -4430,21 +4418,24 @@ static const struct file_operations proc_statsdelta_ops = {
 	.owner		= THIS_MODULE,
 	.read		= proc_read,
 	.open		= proc_statsdelta_open,
-	.release	= proc_close
+	.release	= proc_close,
+	.llseek		= default_llseek,
 };
 
 static const struct file_operations proc_stats_ops = {
 	.owner		= THIS_MODULE,
 	.read		= proc_read,
 	.open		= proc_stats_open,
-	.release	= proc_close
+	.release	= proc_close,
+	.llseek		= default_llseek,
 };
 
 static const struct file_operations proc_status_ops = {
 	.owner		= THIS_MODULE,
 	.read		= proc_read,
 	.open		= proc_status_open,
-	.release	= proc_close
+	.release	= proc_close,
+	.llseek		= default_llseek,
 };
 
 static const struct file_operations proc_SSID_ops = {
@@ -4452,7 +4443,8 @@ static const struct file_operations proc_SSID_ops = {
 	.read		= proc_read,
 	.write		= proc_write,
 	.open		= proc_SSID_open,
-	.release	= proc_close
+	.release	= proc_close,
+	.llseek		= default_llseek,
 };
 
 static const struct file_operations proc_BSSList_ops = {
@@ -4460,7 +4452,8 @@ static const struct file_operations proc_BSSList_ops = {
 	.read		= proc_read,
 	.write		= proc_write,
 	.open		= proc_BSSList_open,
-	.release	= proc_close
+	.release	= proc_close,
+	.llseek		= default_llseek,
 };
 
 static const struct file_operations proc_APList_ops = {
@@ -4468,7 +4461,8 @@ static const struct file_operations proc_APList_ops = {
 	.read		= proc_read,
 	.write		= proc_write,
 	.open		= proc_APList_open,
-	.release	= proc_close
+	.release	= proc_close,
+	.llseek		= default_llseek,
 };
 
 static const struct file_operations proc_config_ops = {
@@ -4476,7 +4470,8 @@ static const struct file_operations proc_config_ops = {
 	.read		= proc_read,
 	.write		= proc_write,
 	.open		= proc_config_open,
-	.release	= proc_close
+	.release	= proc_close,
+	.llseek		= default_llseek,
 };
 
 static const struct file_operations proc_wepkey_ops = {
@@ -4484,7 +4479,8 @@ static const struct file_operations proc_wepkey_ops = {
 	.read		= proc_read,
 	.write		= proc_write,
 	.open		= proc_wepkey_open,
-	.release	= proc_close
+	.release	= proc_close,
+	.llseek		= default_llseek,
 };
 
 static struct proc_dir_entry *airo_entry;
@@ -4656,24 +4652,18 @@ static ssize_t proc_write( struct file *file,
 			   size_t len,
 			   loff_t *offset )
 {
-	loff_t pos = *offset;
+	ssize_t ret;
 	struct proc_data *priv = file->private_data;
 
 	if (!priv->wbuffer)
 		return -EINVAL;
 
-	if (pos < 0)
-		return -EINVAL;
-	if (pos >= priv->maxwritelen)
-		return 0;
-	if (len > priv->maxwritelen - pos)
-		len = priv->maxwritelen - pos;
-	if (copy_from_user(priv->wbuffer + pos, buffer, len))
-		return -EFAULT;
-	if ( pos + len > priv->writelen )
-		priv->writelen = len + file->f_pos;
-	*offset = pos + len;
-	return len;
+	ret = simple_write_to_buffer(priv->wbuffer, priv->maxwritelen, offset,
+					buffer, len);
+	if (ret > 0)
+		priv->writelen = max_t(int, priv->writelen, *offset);
+
+	return ret;
 }
 
 static int proc_status_open(struct inode *inode, struct file *file)
@@ -4786,7 +4776,7 @@ static int proc_stats_rid_open( struct inode *inode,
 		if (!statsLabels[i]) continue;
 		if (j+strlen(statsLabels[i])+16>4096) {
 			airo_print_warn(apriv->dev->name,
-			       "Potentially disasterous buffer overflow averted!");
+			       "Potentially disastrous buffer overflow averted!");
 			break;
 		}
 		j+=sprintf(data->rbuffer+j, "%s: %u\n", statsLabels[i],
@@ -5024,7 +5014,7 @@ static void proc_config_on_close(struct inode *inode, struct file *file)
 	airo_config_commit(dev, NULL, NULL, NULL);
 }
 
-static char *get_rmode(__le16 mode)
+static const char *get_rmode(__le16 mode)
 {
         switch(mode & RXMODE_MASK) {
         case RXMODE_RFMON:  return "rfmon";

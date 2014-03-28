@@ -22,342 +22,290 @@
 #include <linux/via-core.h>
 #include "global.h"
 
-static struct pll_map pll_value[] = {
-	{25175000,
-		{99, 7, 3},
-		{85, 3, 4},	/* ignoring bit difference: 0x00008000 */
-		{141, 5, 4},
-		{141, 5, 4} },
-	{29581000,
-		{33, 4, 2},
-		{66, 2, 4},	/* ignoring bit difference: 0x00808000 */
-		{166, 5, 4},	/* ignoring bit difference: 0x00008000 */
-		{165, 5, 4} },
-	{26880000,
-		{15, 4, 1},
-		{30, 2, 3},	/* ignoring bit difference: 0x00808000 */
-		{150, 5, 4},
-		{150, 5, 4} },
-	{31500000,
-		{53, 3, 3},	/* ignoring bit difference: 0x00008000 */
-		{141, 4, 4},	/* ignoring bit difference: 0x00008000 */
-		{176, 5, 4},
-		{176, 5, 4} },
-	{31728000,
-		{31, 7, 1},
-		{177, 5, 4},	/* ignoring bit difference: 0x00008000 */
-		{177, 5, 4},
-		{142, 4, 4} },
-	{32688000,
-		{73, 4, 3},
-		{146, 4, 4},	/* ignoring bit difference: 0x00008000 */
-		{183, 5, 4},
-		{146, 4, 4} },
-	{36000000,
-		{101, 5, 3},	/* ignoring bit difference: 0x00008000 */
-		{161, 4, 4},	/* ignoring bit difference: 0x00008000 */
-		{202, 5, 4},
-		{161, 4, 4} },
-	{40000000,
-		{89, 4, 3},
-		{89, 4, 3},	/* ignoring bit difference: 0x00008000 */
-		{112, 5, 3},
-		{112, 5, 3} },
-	{41291000,
-		{23, 4, 1},
-		{69, 3, 3},	/* ignoring bit difference: 0x00008000 */
-		{115, 5, 3},
-		{115, 5, 3} },
-	{43163000,
-		{121, 5, 3},
-		{121, 5, 3},	/* ignoring bit difference: 0x00008000 */
-		{121, 5, 3},
-		{121, 5, 3} },
-	{45250000,
-		{127, 5, 3},
-		{127, 5, 3},	/* ignoring bit difference: 0x00808000 */
-		{127, 5, 3},
-		{127, 5, 3} },
-	{46000000,
-		{90, 7, 2},
-		{103, 4, 3},	/* ignoring bit difference: 0x00008000 */
-		{129, 5, 3},
-		{103, 4, 3} },
-	{46996000,
-		{105, 4, 3},	/* ignoring bit difference: 0x00008000 */
-		{131, 5, 3},	/* ignoring bit difference: 0x00808000 */
-		{131, 5, 3},	/* ignoring bit difference: 0x00808000 */
-		{105, 4, 3} },
-	{48000000,
-		{67, 20, 0},
-		{134, 5, 3},	/* ignoring bit difference: 0x00808000 */
-		{134, 5, 3},
-		{134, 5, 3} },
-	{48875000,
-		{99, 29, 0},
-		{82, 3, 3},	/* ignoring bit difference: 0x00808000 */
-		{82, 3, 3},	/* ignoring bit difference: 0x00808000 */
-		{137, 5, 3} },
-	{49500000,
-		{83, 6, 2},
-		{83, 3, 3},	/* ignoring bit difference: 0x00008000 */
-		{138, 5, 3},
-		{83, 3, 3} },
-	{52406000,
-		{117, 4, 3},
-		{117, 4, 3},	/* ignoring bit difference: 0x00008000 */
-		{117, 4, 3},
-		{88, 3, 3} },
-	{52977000,
-		{37, 5, 1},
-		{148, 5, 3},	/* ignoring bit difference: 0x00808000 */
-		{148, 5, 3},
-		{148, 5, 3} },
-	{56250000,
-		{55, 7, 1},	/* ignoring bit difference: 0x00008000 */
-		{126, 4, 3},	/* ignoring bit difference: 0x00008000 */
-		{157, 5, 3},
-		{157, 5, 3} },
-	{57275000,
-		{0, 0, 0},
-		{2, 2, 0},
-		{2, 2, 0},
-		{157, 5, 3} },	/* ignoring bit difference: 0x00808000 */
-	{60466000,
-		{76, 9, 1},
-		{169, 5, 3},	/* ignoring bit difference: 0x00808000 */
-		{169, 5, 3},	/* FIXED: old = {72, 2, 3} */
-		{169, 5, 3} },
-	{61500000,
-		{86, 20, 0},
-		{172, 5, 3},	/* ignoring bit difference: 0x00808000 */
-		{172, 5, 3},
-		{172, 5, 3} },
-	{65000000,
-		{109, 6, 2},	/* ignoring bit difference: 0x00008000 */
-		{109, 3, 3},	/* ignoring bit difference: 0x00008000 */
-		{109, 3, 3},
-		{109, 3, 3} },
-	{65178000,
-		{91, 5, 2},
-		{182, 5, 3},	/* ignoring bit difference: 0x00808000 */
-		{109, 3, 3},
-		{182, 5, 3} },
-	{66750000,
-		{75, 4, 2},
-		{150, 4, 3},	/* ignoring bit difference: 0x00808000 */
-		{150, 4, 3},
-		{112, 3, 3} },
-	{68179000,
-		{19, 4, 0},
-		{114, 3, 3},	/* ignoring bit difference: 0x00008000 */
-		{190, 5, 3},
-		{191, 5, 3} },
-	{69924000,
-		{83, 17, 0},
-		{195, 5, 3},	/* ignoring bit difference: 0x00808000 */
-		{195, 5, 3},
-		{195, 5, 3} },
-	{70159000,
-		{98, 20, 0},
-		{196, 5, 3},	/* ignoring bit difference: 0x00808000 */
-		{196, 5, 3},
-		{195, 5, 3} },
-	{72000000,
-		{121, 24, 0},
-		{161, 4, 3},	/* ignoring bit difference: 0x00808000 */
-		{161, 4, 3},
-		{161, 4, 3} },
-	{78750000,
-		{33, 3, 1},
-		{66, 3, 2},	/* ignoring bit difference: 0x00008000 */
-		{110, 5, 2},
-		{110, 5, 2} },
-	{80136000,
-		{28, 5, 0},
-		{68, 3, 2},	/* ignoring bit difference: 0x00008000 */
-		{112, 5, 2},
-		{112, 5, 2} },
-	{83375000,
-		{93, 2, 3},
-		{93, 4, 2},	/* ignoring bit difference: 0x00800000 */
-		{93, 4, 2},	/* ignoring bit difference: 0x00800000 */
-		{117, 5, 2} },
-	{83950000,
-		{41, 7, 0},
-		{117, 5, 2},	/* ignoring bit difference: 0x00008000 */
-		{117, 5, 2},
-		{117, 5, 2} },
-	{84750000,
-		{118, 5, 2},
-		{118, 5, 2},	/* ignoring bit difference: 0x00808000 */
-		{118, 5, 2},
-		{118, 5, 2} },
-	{85860000,
-		{84, 7, 1},
-		{120, 5, 2},	/* ignoring bit difference: 0x00808000 */
-		{120, 5, 2},
-		{118, 5, 2} },
-	{88750000,
-		{31, 5, 0},
-		{124, 5, 2},	/* ignoring bit difference: 0x00808000 */
-		{174, 7, 2},	/* ignoring bit difference: 0x00808000 */
-		{124, 5, 2} },
-	{94500000,
-		{33, 5, 0},
-		{132, 5, 2},	/* ignoring bit difference: 0x00008000 */
-		{132, 5, 2},
-		{132, 5, 2} },
-	{97750000,
-		{82, 6, 1},
-		{137, 5, 2},	/* ignoring bit difference: 0x00808000 */
-		{137, 5, 2},
-		{137, 5, 2} },
-	{101000000,
-		{127, 9, 1},
-		{141, 5, 2},	/* ignoring bit difference: 0x00808000 */
-		{141, 5, 2},
-		{141, 5, 2} },
-	{106500000,
-		{119, 4, 2},
-		{119, 4, 2},	/* ignoring bit difference: 0x00808000 */
-		{119, 4, 2},
-		{149, 5, 2} },
-	{108000000,
-		{121, 4, 2},
-		{121, 4, 2},	/* ignoring bit difference: 0x00808000 */
-		{151, 5, 2},
-		{151, 5, 2} },
-	{113309000,
-		{95, 12, 0},
-		{95, 3, 2},	/* ignoring bit difference: 0x00808000 */
-		{95, 3, 2},
-		{159, 5, 2} },
-	{118840000,
-		{83, 5, 1},
-		{166, 5, 2},	/* ignoring bit difference: 0x00808000 */
-		{166, 5, 2},
-		{166, 5, 2} },
-	{119000000,
-		{108, 13, 0},
-		{133, 4, 2},	/* ignoring bit difference: 0x00808000 */
-		{133, 4, 2},
-		{167, 5, 2} },
-	{121750000,
-		{85, 5, 1},
-		{170, 5, 2},	/* ignoring bit difference: 0x00808000 */
-		{68, 2, 2},
-		{0, 0, 0} },
-	{125104000,
-		{53, 6, 0},	/* ignoring bit difference: 0x00008000 */
-		{106, 3, 2},	/* ignoring bit difference: 0x00008000 */
-		{175, 5, 2},
-		{0, 0, 0} },
-	{135000000,
-		{94, 5, 1},
-		{28, 3, 0},	/* ignoring bit difference: 0x00804000 */
-		{151, 4, 2},
-		{189, 5, 2} },
-	{136700000,
-		{115, 12, 0},
-		{191, 5, 2},	/* ignoring bit difference: 0x00808000 */
-		{191, 5, 2},
-		{191, 5, 2} },
-	{138400000,
-		{87, 9, 0},
-		{116, 3, 2},	/* ignoring bit difference: 0x00808000 */
-		{116, 3, 2},
-		{194, 5, 2} },
-	{146760000,
-		{103, 5, 1},
-		{206, 5, 2},	/* ignoring bit difference: 0x00808000 */
-		{206, 5, 2},
-		{206, 5, 2} },
-	{153920000,
-		{86, 8, 0},
-		{86, 4, 1},	/* ignoring bit difference: 0x00808000 */
-		{86, 4, 1},
-		{86, 4, 1} },	/* FIXED: old = {84, 2, 1} */
-	{156000000,
-		{109, 5, 1},
-		{109, 5, 1},	/* ignoring bit difference: 0x00808000 */
-		{109, 5, 1},
-		{108, 5, 1} },
-	{157500000,
-		{55, 5, 0},	/* ignoring bit difference: 0x00008000 */
-		{22, 2, 0},	/* ignoring bit difference: 0x00802000 */
-		{110, 5, 1},
-		{110, 5, 1} },
-	{162000000,
-		{113, 5, 1},
-		{113, 5, 1},	/* ignoring bit difference: 0x00808000 */
-		{113, 5, 1},
-		{113, 5, 1} },
-	{187000000,
-		{118, 9, 0},
-		{131, 5, 1},	/* ignoring bit difference: 0x00808000 */
-		{131, 5, 1},
-		{131, 5, 1} },
-	{193295000,
-		{108, 8, 0},
-		{81, 3, 1},	/* ignoring bit difference: 0x00808000 */
-		{135, 5, 1},
-		{135, 5, 1} },
-	{202500000,
-		{99, 7, 0},
-		{85, 3, 1},	/* ignoring bit difference: 0x00808000 */
-		{142, 5, 1},
-		{142, 5, 1} },
-	{204000000,
-		{100, 7, 0},
-		{143, 5, 1},	/* ignoring bit difference: 0x00808000 */
-		{143, 5, 1},
-		{143, 5, 1} },
-	{218500000,
-		{92, 6, 0},
-		{153, 5, 1},	/* ignoring bit difference: 0x00808000 */
-		{153, 5, 1},
-		{153, 5, 1} },
-	{234000000,
-		{98, 6, 0},
-		{98, 3, 1},	/* ignoring bit difference: 0x00008000 */
-		{98, 3, 1},
-		{164, 5, 1} },
-	{267250000,
-		{112, 6, 0},
-		{112, 3, 1},	/* ignoring bit difference: 0x00808000 */
-		{187, 5, 1},
-		{187, 5, 1} },
-	{297500000,
-		{102, 5, 0},	/* ignoring bit difference: 0x00008000 */
-		{166, 4, 1},	/* ignoring bit difference: 0x00008000 */
-		{208, 5, 1},
-		{208, 5, 1} },
-	{74481000,
-		{26, 5, 0},
-		{125, 3, 3},	/* ignoring bit difference: 0x00808000 */
-		{208, 5, 3},
-		{209, 5, 3} },
-	{172798000,
-		{121, 5, 1},
-		{121, 5, 1},	/* ignoring bit difference: 0x00808000 */
-		{121, 5, 1},
-		{121, 5, 1} },
-	{122614000,
-		{60, 7, 0},
-		{137, 4, 2},	/* ignoring bit difference: 0x00808000 */
-		{137, 4, 2},
-		{172, 5, 2} },
-	{74270000,
-		{83, 8, 1},
-		{208, 5, 3},
-		{208, 5, 3},
-		{0, 0, 0} },
-	{148500000,
-		{83, 8, 0},
-		{208, 5, 2},
-		{166, 4, 2},
-		{208, 5, 2} }
+static struct pll_config cle266_pll_config[] = {
+	{19, 4, 0},
+	{26, 5, 0},
+	{28, 5, 0},
+	{31, 5, 0},
+	{33, 5, 0},
+	{55, 5, 0},
+	{102, 5, 0},
+	{53, 6, 0},
+	{92, 6, 0},
+	{98, 6, 0},
+	{112, 6, 0},
+	{41, 7, 0},
+	{60, 7, 0},
+	{99, 7, 0},
+	{100, 7, 0},
+	{83, 8, 0},
+	{86, 8, 0},
+	{108, 8, 0},
+	{87, 9, 0},
+	{118, 9, 0},
+	{95, 12, 0},
+	{115, 12, 0},
+	{108, 13, 0},
+	{83, 17, 0},
+	{67, 20, 0},
+	{86, 20, 0},
+	{98, 20, 0},
+	{121, 24, 0},
+	{99, 29, 0},
+	{33, 3, 1},
+	{15, 4, 1},
+	{23, 4, 1},
+	{37, 5, 1},
+	{83, 5, 1},
+	{85, 5, 1},
+	{94, 5, 1},
+	{103, 5, 1},
+	{109, 5, 1},
+	{113, 5, 1},
+	{121, 5, 1},
+	{82, 6, 1},
+	{31, 7, 1},
+	{55, 7, 1},
+	{84, 7, 1},
+	{83, 8, 1},
+	{76, 9, 1},
+	{127, 9, 1},
+	{33, 4, 2},
+	{75, 4, 2},
+	{119, 4, 2},
+	{121, 4, 2},
+	{91, 5, 2},
+	{118, 5, 2},
+	{83, 6, 2},
+	{109, 6, 2},
+	{90, 7, 2},
+	{93, 2, 3},
+	{53, 3, 3},
+	{73, 4, 3},
+	{89, 4, 3},
+	{105, 4, 3},
+	{117, 4, 3},
+	{101, 5, 3},
+	{121, 5, 3},
+	{127, 5, 3},
+	{99, 7, 3}
+};
+
+static struct pll_config k800_pll_config[] = {
+	{22, 2, 0},
+	{28, 3, 0},
+	{81, 3, 1},
+	{85, 3, 1},
+	{98, 3, 1},
+	{112, 3, 1},
+	{86, 4, 1},
+	{166, 4, 1},
+	{109, 5, 1},
+	{113, 5, 1},
+	{121, 5, 1},
+	{131, 5, 1},
+	{143, 5, 1},
+	{153, 5, 1},
+	{66, 3, 2},
+	{68, 3, 2},
+	{95, 3, 2},
+	{106, 3, 2},
+	{116, 3, 2},
+	{93, 4, 2},
+	{119, 4, 2},
+	{121, 4, 2},
+	{133, 4, 2},
+	{137, 4, 2},
+	{117, 5, 2},
+	{118, 5, 2},
+	{120, 5, 2},
+	{124, 5, 2},
+	{132, 5, 2},
+	{137, 5, 2},
+	{141, 5, 2},
+	{166, 5, 2},
+	{170, 5, 2},
+	{191, 5, 2},
+	{206, 5, 2},
+	{208, 5, 2},
+	{30, 2, 3},
+	{69, 3, 3},
+	{82, 3, 3},
+	{83, 3, 3},
+	{109, 3, 3},
+	{114, 3, 3},
+	{125, 3, 3},
+	{89, 4, 3},
+	{103, 4, 3},
+	{117, 4, 3},
+	{126, 4, 3},
+	{150, 4, 3},
+	{161, 4, 3},
+	{121, 5, 3},
+	{127, 5, 3},
+	{131, 5, 3},
+	{134, 5, 3},
+	{148, 5, 3},
+	{169, 5, 3},
+	{172, 5, 3},
+	{182, 5, 3},
+	{195, 5, 3},
+	{196, 5, 3},
+	{208, 5, 3},
+	{66, 2, 4},
+	{85, 3, 4},
+	{141, 4, 4},
+	{146, 4, 4},
+	{161, 4, 4},
+	{177, 5, 4}
+};
+
+static struct pll_config cx700_pll_config[] = {
+	{98, 3, 1},
+	{86, 4, 1},
+	{109, 5, 1},
+	{110, 5, 1},
+	{113, 5, 1},
+	{121, 5, 1},
+	{131, 5, 1},
+	{135, 5, 1},
+	{142, 5, 1},
+	{143, 5, 1},
+	{153, 5, 1},
+	{187, 5, 1},
+	{208, 5, 1},
+	{68, 2, 2},
+	{95, 3, 2},
+	{116, 3, 2},
+	{93, 4, 2},
+	{119, 4, 2},
+	{133, 4, 2},
+	{137, 4, 2},
+	{151, 4, 2},
+	{166, 4, 2},
+	{110, 5, 2},
+	{112, 5, 2},
+	{117, 5, 2},
+	{118, 5, 2},
+	{120, 5, 2},
+	{132, 5, 2},
+	{137, 5, 2},
+	{141, 5, 2},
+	{151, 5, 2},
+	{166, 5, 2},
+	{175, 5, 2},
+	{191, 5, 2},
+	{206, 5, 2},
+	{174, 7, 2},
+	{82, 3, 3},
+	{109, 3, 3},
+	{117, 4, 3},
+	{150, 4, 3},
+	{161, 4, 3},
+	{112, 5, 3},
+	{115, 5, 3},
+	{121, 5, 3},
+	{127, 5, 3},
+	{129, 5, 3},
+	{131, 5, 3},
+	{134, 5, 3},
+	{138, 5, 3},
+	{148, 5, 3},
+	{157, 5, 3},
+	{169, 5, 3},
+	{172, 5, 3},
+	{190, 5, 3},
+	{195, 5, 3},
+	{196, 5, 3},
+	{208, 5, 3},
+	{141, 5, 4},
+	{150, 5, 4},
+	{166, 5, 4},
+	{176, 5, 4},
+	{177, 5, 4},
+	{183, 5, 4},
+	{202, 5, 4}
+};
+
+static struct pll_config vx855_pll_config[] = {
+	{86, 4, 1},
+	{108, 5, 1},
+	{110, 5, 1},
+	{113, 5, 1},
+	{121, 5, 1},
+	{131, 5, 1},
+	{135, 5, 1},
+	{142, 5, 1},
+	{143, 5, 1},
+	{153, 5, 1},
+	{164, 5, 1},
+	{187, 5, 1},
+	{208, 5, 1},
+	{110, 5, 2},
+	{112, 5, 2},
+	{117, 5, 2},
+	{118, 5, 2},
+	{124, 5, 2},
+	{132, 5, 2},
+	{137, 5, 2},
+	{141, 5, 2},
+	{149, 5, 2},
+	{151, 5, 2},
+	{159, 5, 2},
+	{166, 5, 2},
+	{167, 5, 2},
+	{172, 5, 2},
+	{189, 5, 2},
+	{191, 5, 2},
+	{194, 5, 2},
+	{206, 5, 2},
+	{208, 5, 2},
+	{83, 3, 3},
+	{88, 3, 3},
+	{109, 3, 3},
+	{112, 3, 3},
+	{103, 4, 3},
+	{105, 4, 3},
+	{161, 4, 3},
+	{112, 5, 3},
+	{115, 5, 3},
+	{121, 5, 3},
+	{127, 5, 3},
+	{134, 5, 3},
+	{137, 5, 3},
+	{148, 5, 3},
+	{157, 5, 3},
+	{169, 5, 3},
+	{172, 5, 3},
+	{182, 5, 3},
+	{191, 5, 3},
+	{195, 5, 3},
+	{209, 5, 3},
+	{142, 4, 4},
+	{146, 4, 4},
+	{161, 4, 4},
+	{141, 5, 4},
+	{150, 5, 4},
+	{165, 5, 4},
+	{176, 5, 4}
+};
+
+/* according to VIA Technologies these values are based on experiment */
+static struct io_reg scaling_parameters[] = {
+	{VIACR, CR7A, 0xFF, 0x01},	/* LCD Scaling Parameter 1 */
+	{VIACR, CR7B, 0xFF, 0x02},	/* LCD Scaling Parameter 2 */
+	{VIACR, CR7C, 0xFF, 0x03},	/* LCD Scaling Parameter 3 */
+	{VIACR, CR7D, 0xFF, 0x04},	/* LCD Scaling Parameter 4 */
+	{VIACR, CR7E, 0xFF, 0x07},	/* LCD Scaling Parameter 5 */
+	{VIACR, CR7F, 0xFF, 0x0A},	/* LCD Scaling Parameter 6 */
+	{VIACR, CR80, 0xFF, 0x0D},	/* LCD Scaling Parameter 7 */
+	{VIACR, CR81, 0xFF, 0x13},	/* LCD Scaling Parameter 8 */
+	{VIACR, CR82, 0xFF, 0x16},	/* LCD Scaling Parameter 9 */
+	{VIACR, CR83, 0xFF, 0x19},	/* LCD Scaling Parameter 10 */
+	{VIACR, CR84, 0xFF, 0x1C},	/* LCD Scaling Parameter 11 */
+	{VIACR, CR85, 0xFF, 0x1D},	/* LCD Scaling Parameter 12 */
+	{VIACR, CR86, 0xFF, 0x1E},	/* LCD Scaling Parameter 13 */
+	{VIACR, CR87, 0xFF, 0x1F},	/* LCD Scaling Parameter 14 */
 };
 
 static struct fifo_depth_select display_fifo_depth_reg = {
@@ -718,16 +666,20 @@ static struct rgbLUT palLUT_table[] = {
 								     0x00}
 };
 
-static void set_crt_output_path(int set_iga);
-static void dvi_patch_skew_dvp0(void);
-static void dvi_patch_skew_dvp1(void);
-static void dvi_patch_skew_dvp_low(void);
-static void set_dvi_output_path(int set_iga, int output_interface);
-static void set_lcd_output_path(int set_iga, int output_interface);
+static struct via_device_mapping device_mapping[] = {
+	{VIA_LDVP0, "LDVP0"},
+	{VIA_LDVP1, "LDVP1"},
+	{VIA_DVP0, "DVP0"},
+	{VIA_CRT, "CRT"},
+	{VIA_DVP1, "DVP1"},
+	{VIA_LVDS1, "LVDS1"},
+	{VIA_LVDS2, "LVDS2"}
+};
+
 static void load_fix_bit_crtc_reg(void);
-static void init_gfx_chip_info(int chip_type);
-static void init_tmds_chip_info(void);
-static void init_lvds_chip_info(void);
+static void __devinit init_gfx_chip_info(int chip_type);
+static void __devinit init_tmds_chip_info(void);
+static void __devinit init_lvds_chip_info(void);
 static void device_screen_off(void);
 static void device_screen_on(void);
 static void set_display_channel(void);
@@ -747,12 +699,72 @@ void viafb_unlock_crt(void)
 	viafb_write_reg_mask(CR47, VIACR, 0, BIT0);
 }
 
-void write_dac_reg(u8 index, u8 r, u8 g, u8 b)
+static void write_dac_reg(u8 index, u8 r, u8 g, u8 b)
 {
 	outb(index, LUT_INDEX_WRITE);
 	outb(r, LUT_DATA);
 	outb(g, LUT_DATA);
 	outb(b, LUT_DATA);
+}
+
+static u32 get_dvi_devices(int output_interface)
+{
+	switch (output_interface) {
+	case INTERFACE_DVP0:
+		return VIA_DVP0 | VIA_LDVP0;
+
+	case INTERFACE_DVP1:
+		if (viaparinfo->chip_info->gfx_chip_name == UNICHROME_CLE266)
+			return VIA_LDVP1;
+		else
+			return VIA_DVP1;
+
+	case INTERFACE_DFP_HIGH:
+		if (viaparinfo->chip_info->gfx_chip_name == UNICHROME_CLE266)
+			return 0;
+		else
+			return VIA_LVDS2 | VIA_DVP0;
+
+	case INTERFACE_DFP_LOW:
+		if (viaparinfo->chip_info->gfx_chip_name == UNICHROME_CLE266)
+			return 0;
+		else
+			return VIA_DVP1 | VIA_LVDS1;
+
+	case INTERFACE_TMDS:
+		return VIA_LVDS1;
+	}
+
+	return 0;
+}
+
+static u32 get_lcd_devices(int output_interface)
+{
+	switch (output_interface) {
+	case INTERFACE_DVP0:
+		return VIA_DVP0;
+
+	case INTERFACE_DVP1:
+		return VIA_DVP1;
+
+	case INTERFACE_DFP_HIGH:
+		return VIA_LVDS2 | VIA_DVP0;
+
+	case INTERFACE_DFP_LOW:
+		return VIA_LVDS1 | VIA_DVP1;
+
+	case INTERFACE_DFP:
+		return VIA_LVDS1 | VIA_LVDS2;
+
+	case INTERFACE_LVDS0:
+	case INTERFACE_LVDS0LVDS1:
+		return VIA_LVDS1;
+
+	case INTERFACE_LVDS1:
+		return VIA_LVDS2;
+	}
+
+	return 0;
 }
 
 /*Set IGA path for each device*/
@@ -821,6 +833,48 @@ void viafb_set_iga_path(void)
 			viaparinfo->tmds_setting_info->iga_path = IGA1;
 		}
 	}
+
+	viaparinfo->shared->iga1_devices = 0;
+	viaparinfo->shared->iga2_devices = 0;
+	if (viafb_CRT_ON) {
+		if (viaparinfo->crt_setting_info->iga_path == IGA1)
+			viaparinfo->shared->iga1_devices |= VIA_CRT;
+		else
+			viaparinfo->shared->iga2_devices |= VIA_CRT;
+	}
+
+	if (viafb_DVI_ON) {
+		if (viaparinfo->tmds_setting_info->iga_path == IGA1)
+			viaparinfo->shared->iga1_devices |= get_dvi_devices(
+				viaparinfo->chip_info->
+				tmds_chip_info.output_interface);
+		else
+			viaparinfo->shared->iga2_devices |= get_dvi_devices(
+				viaparinfo->chip_info->
+				tmds_chip_info.output_interface);
+	}
+
+	if (viafb_LCD_ON) {
+		if (viaparinfo->lvds_setting_info->iga_path == IGA1)
+			viaparinfo->shared->iga1_devices |= get_lcd_devices(
+				viaparinfo->chip_info->
+				lvds_chip_info.output_interface);
+		else
+			viaparinfo->shared->iga2_devices |= get_lcd_devices(
+				viaparinfo->chip_info->
+				lvds_chip_info.output_interface);
+	}
+
+	if (viafb_LCD2_ON) {
+		if (viaparinfo->lvds_setting_info2->iga_path == IGA1)
+			viaparinfo->shared->iga1_devices |= get_lcd_devices(
+				viaparinfo->chip_info->
+				lvds_chip_info2.output_interface);
+		else
+			viaparinfo->shared->iga2_devices |= get_lcd_devices(
+				viaparinfo->chip_info->
+				lvds_chip_info2.output_interface);
+	}
 }
 
 static void set_color_register(u8 index, u8 red, u8 green, u8 blue)
@@ -844,295 +898,266 @@ void viafb_set_secondary_color_register(u8 index, u8 red, u8 green, u8 blue)
 	set_color_register(index, red, green, blue);
 }
 
-void viafb_set_output_path(int device, int set_iga, int output_interface)
+static void set_source_common(u8 index, u8 offset, u8 iga)
 {
-	switch (device) {
-	case DEVICE_CRT:
-		set_crt_output_path(set_iga);
-		break;
-	case DEVICE_DVI:
-		set_dvi_output_path(set_iga, output_interface);
-		break;
-	case DEVICE_LCD:
-		set_lcd_output_path(set_iga, output_interface);
-		break;
-	}
-}
+	u8 value, mask = 1 << offset;
 
-static void set_crt_output_path(int set_iga)
-{
-	viafb_write_reg_mask(CR36, VIACR, 0x00, BIT4 + BIT5);
-
-	switch (set_iga) {
+	switch (iga) {
 	case IGA1:
-		viafb_write_reg_mask(SR16, VIASR, 0x00, BIT6);
+		value = 0x00;
 		break;
 	case IGA2:
-		viafb_write_reg_mask(CR6A, VIACR, 0xC0, BIT6 + BIT7);
-		viafb_write_reg_mask(SR16, VIASR, 0x40, BIT6);
+		value = mask;
 		break;
-	}
-}
-
-static void dvi_patch_skew_dvp0(void)
-{
-	/* Reset data driving first: */
-	viafb_write_reg_mask(SR1B, VIASR, 0, BIT1);
-	viafb_write_reg_mask(SR2A, VIASR, 0, BIT4);
-
-	switch (viaparinfo->chip_info->gfx_chip_name) {
-	case UNICHROME_P4M890:
-		{
-			if ((viaparinfo->tmds_setting_info->h_active == 1600) &&
-				(viaparinfo->tmds_setting_info->v_active ==
-				1200))
-				viafb_write_reg_mask(CR96, VIACR, 0x03,
-					       BIT0 + BIT1 + BIT2);
-			else
-				viafb_write_reg_mask(CR96, VIACR, 0x07,
-					       BIT0 + BIT1 + BIT2);
-			break;
-		}
-
-	case UNICHROME_P4M900:
-		{
-			viafb_write_reg_mask(CR96, VIACR, 0x07,
-				       BIT0 + BIT1 + BIT2 + BIT3);
-			viafb_write_reg_mask(SR1B, VIASR, 0x02, BIT1);
-			viafb_write_reg_mask(SR2A, VIASR, 0x10, BIT4);
-			break;
-		}
-
 	default:
-		{
-			break;
-		}
+		printk(KERN_WARNING "viafb: Unsupported source: %d\n", iga);
+		return;
 	}
+
+	via_write_reg_mask(VIACR, index, value, mask);
 }
 
-static void dvi_patch_skew_dvp1(void)
+static void set_crt_source(u8 iga)
 {
-	switch (viaparinfo->chip_info->gfx_chip_name) {
-	case UNICHROME_CX700:
-		{
-			break;
-		}
+	u8 value;
 
-	default:
-		{
-			break;
-		}
-	}
-}
-
-static void dvi_patch_skew_dvp_low(void)
-{
-	switch (viaparinfo->chip_info->gfx_chip_name) {
-	case UNICHROME_K8M890:
-		{
-			viafb_write_reg_mask(CR99, VIACR, 0x03, BIT0 + BIT1);
-			break;
-		}
-
-	case UNICHROME_P4M900:
-		{
-			viafb_write_reg_mask(CR99, VIACR, 0x08,
-				       BIT0 + BIT1 + BIT2 + BIT3);
-			break;
-		}
-
-	case UNICHROME_P4M890:
-		{
-			viafb_write_reg_mask(CR99, VIACR, 0x0F,
-				       BIT0 + BIT1 + BIT2 + BIT3);
-			break;
-		}
-
-	default:
-		{
-			break;
-		}
-	}
-}
-
-static void set_dvi_output_path(int set_iga, int output_interface)
-{
-	switch (output_interface) {
-	case INTERFACE_DVP0:
-		viafb_write_reg_mask(CR6B, VIACR, 0x01, BIT0);
-
-		if (set_iga == IGA1) {
-			viafb_write_reg_mask(CR96, VIACR, 0x00, BIT4);
-			viafb_write_reg_mask(CR6C, VIACR, 0x21, BIT0 +
-				BIT5 + BIT7);
-		} else {
-			viafb_write_reg_mask(CR96, VIACR, 0x10, BIT4);
-			viafb_write_reg_mask(CR6C, VIACR, 0xA1, BIT0 +
-				BIT5 + BIT7);
-		}
-
-		viafb_write_reg_mask(SR1E, VIASR, 0xC0, BIT7 + BIT6);
-
-		dvi_patch_skew_dvp0();
+	switch (iga) {
+	case IGA1:
+		value = 0x00;
 		break;
-
-	case INTERFACE_DVP1:
-		if (viaparinfo->chip_info->gfx_chip_name == UNICHROME_CLE266) {
-			if (set_iga == IGA1)
-				viafb_write_reg_mask(CR93, VIACR, 0x21,
-					       BIT0 + BIT5 + BIT7);
-			else
-				viafb_write_reg_mask(CR93, VIACR, 0xA1,
-					       BIT0 + BIT5 + BIT7);
-		} else {
-			if (set_iga == IGA1)
-				viafb_write_reg_mask(CR9B, VIACR, 0x00, BIT4);
-			else
-				viafb_write_reg_mask(CR9B, VIACR, 0x10, BIT4);
-		}
-
-		viafb_write_reg_mask(SR1E, VIASR, 0x30, BIT4 + BIT5);
-		dvi_patch_skew_dvp1();
+	case IGA2:
+		value = 0x40;
 		break;
-	case INTERFACE_DFP_HIGH:
-		if (viaparinfo->chip_info->gfx_chip_name != UNICHROME_CLE266) {
-			if (set_iga == IGA1) {
-				viafb_write_reg_mask(CR96, VIACR, 0x00, BIT4);
-				viafb_write_reg_mask(CR97, VIACR, 0x03,
-					       BIT0 + BIT1 + BIT4);
-			} else {
-				viafb_write_reg_mask(CR96, VIACR, 0x10, BIT4);
-				viafb_write_reg_mask(CR97, VIACR, 0x13,
-					       BIT0 + BIT1 + BIT4);
+	default:
+		printk(KERN_WARNING "viafb: Unsupported source: %d\n", iga);
+		return;
+	}
+
+	via_write_reg_mask(VIASR, 0x16, value, 0x40);
+}
+
+static inline void set_ldvp0_source(u8 iga)
+{
+	set_source_common(0x6C, 7, iga);
+}
+
+static inline void set_ldvp1_source(u8 iga)
+{
+	set_source_common(0x93, 7, iga);
+}
+
+static inline void set_dvp0_source(u8 iga)
+{
+	set_source_common(0x96, 4, iga);
+}
+
+static inline void set_dvp1_source(u8 iga)
+{
+	set_source_common(0x9B, 4, iga);
+}
+
+static inline void set_lvds1_source(u8 iga)
+{
+	set_source_common(0x99, 4, iga);
+}
+
+static inline void set_lvds2_source(u8 iga)
+{
+	set_source_common(0x97, 4, iga);
+}
+
+void via_set_source(u32 devices, u8 iga)
+{
+	if (devices & VIA_LDVP0)
+		set_ldvp0_source(iga);
+	if (devices & VIA_LDVP1)
+		set_ldvp1_source(iga);
+	if (devices & VIA_DVP0)
+		set_dvp0_source(iga);
+	if (devices & VIA_CRT)
+		set_crt_source(iga);
+	if (devices & VIA_DVP1)
+		set_dvp1_source(iga);
+	if (devices & VIA_LVDS1)
+		set_lvds1_source(iga);
+	if (devices & VIA_LVDS2)
+		set_lvds2_source(iga);
+}
+
+static void set_crt_state(u8 state)
+{
+	u8 value;
+
+	switch (state) {
+	case VIA_STATE_ON:
+		value = 0x00;
+		break;
+	case VIA_STATE_STANDBY:
+		value = 0x10;
+		break;
+	case VIA_STATE_SUSPEND:
+		value = 0x20;
+		break;
+	case VIA_STATE_OFF:
+		value = 0x30;
+		break;
+	default:
+		return;
+	}
+
+	via_write_reg_mask(VIACR, 0x36, value, 0x30);
+}
+
+static void set_dvp0_state(u8 state)
+{
+	u8 value;
+
+	switch (state) {
+	case VIA_STATE_ON:
+		value = 0xC0;
+		break;
+	case VIA_STATE_OFF:
+		value = 0x00;
+		break;
+	default:
+		return;
+	}
+
+	via_write_reg_mask(VIASR, 0x1E, value, 0xC0);
+}
+
+static void set_dvp1_state(u8 state)
+{
+	u8 value;
+
+	switch (state) {
+	case VIA_STATE_ON:
+		value = 0x30;
+		break;
+	case VIA_STATE_OFF:
+		value = 0x00;
+		break;
+	default:
+		return;
+	}
+
+	via_write_reg_mask(VIASR, 0x1E, value, 0x30);
+}
+
+static void set_lvds1_state(u8 state)
+{
+	u8 value;
+
+	switch (state) {
+	case VIA_STATE_ON:
+		value = 0x03;
+		break;
+	case VIA_STATE_OFF:
+		value = 0x00;
+		break;
+	default:
+		return;
+	}
+
+	via_write_reg_mask(VIASR, 0x2A, value, 0x03);
+}
+
+static void set_lvds2_state(u8 state)
+{
+	u8 value;
+
+	switch (state) {
+	case VIA_STATE_ON:
+		value = 0x0C;
+		break;
+	case VIA_STATE_OFF:
+		value = 0x00;
+		break;
+	default:
+		return;
+	}
+
+	via_write_reg_mask(VIASR, 0x2A, value, 0x0C);
+}
+
+void via_set_state(u32 devices, u8 state)
+{
+	/*
+	TODO: Can we enable/disable these devices? How?
+	if (devices & VIA_LDVP0)
+	if (devices & VIA_LDVP1)
+	*/
+	if (devices & VIA_DVP0)
+		set_dvp0_state(state);
+	if (devices & VIA_CRT)
+		set_crt_state(state);
+	if (devices & VIA_DVP1)
+		set_dvp1_state(state);
+	if (devices & VIA_LVDS1)
+		set_lvds1_state(state);
+	if (devices & VIA_LVDS2)
+		set_lvds2_state(state);
+}
+
+void via_set_sync_polarity(u32 devices, u8 polarity)
+{
+	if (polarity & ~(VIA_HSYNC_NEGATIVE | VIA_VSYNC_NEGATIVE)) {
+		printk(KERN_WARNING "viafb: Unsupported polarity: %d\n",
+			polarity);
+		return;
+	}
+
+	if (devices & VIA_CRT)
+		via_write_misc_reg_mask(polarity << 6, 0xC0);
+	if (devices & VIA_DVP1)
+		via_write_reg_mask(VIACR, 0x9B, polarity << 5, 0x60);
+	if (devices & VIA_LVDS1)
+		via_write_reg_mask(VIACR, 0x99, polarity << 5, 0x60);
+	if (devices & VIA_LVDS2)
+		via_write_reg_mask(VIACR, 0x97, polarity << 5, 0x60);
+}
+
+u32 via_parse_odev(char *input, char **end)
+{
+	char *ptr = input;
+	u32 odev = 0;
+	bool next = true;
+	int i, len;
+
+	while (next) {
+		next = false;
+		for (i = 0; i < ARRAY_SIZE(device_mapping); i++) {
+			len = strlen(device_mapping[i].name);
+			if (!strncmp(ptr, device_mapping[i].name, len)) {
+				odev |= device_mapping[i].device;
+				ptr += len;
+				if (*ptr == ',') {
+					ptr++;
+					next = true;
+				}
 			}
 		}
-		viafb_write_reg_mask(SR2A, VIASR, 0x0C, BIT2 + BIT3);
-		break;
-
-	case INTERFACE_DFP_LOW:
-		if (viaparinfo->chip_info->gfx_chip_name == UNICHROME_CLE266)
-			break;
-
-		if (set_iga == IGA1) {
-			viafb_write_reg_mask(CR99, VIACR, 0x00, BIT4);
-			viafb_write_reg_mask(CR9B, VIACR, 0x00, BIT4);
-		} else {
-			viafb_write_reg_mask(CR99, VIACR, 0x10, BIT4);
-			viafb_write_reg_mask(CR9B, VIACR, 0x10, BIT4);
-		}
-
-		viafb_write_reg_mask(SR2A, VIASR, 0x03, BIT0 + BIT1);
-		dvi_patch_skew_dvp_low();
-		break;
-
-	case INTERFACE_TMDS:
-		if (set_iga == IGA1)
-			viafb_write_reg_mask(CR99, VIACR, 0x00, BIT4);
-		else
-			viafb_write_reg_mask(CR99, VIACR, 0x10, BIT4);
-		break;
 	}
 
-	if (set_iga == IGA2) {
-		enable_second_display_channel();
-		/* Disable LCD Scaling */
-		viafb_write_reg_mask(CR79, VIACR, 0x00, BIT0);
-	}
+	*end = ptr;
+	return odev;
 }
 
-static void set_lcd_output_path(int set_iga, int output_interface)
+void via_odev_to_seq(struct seq_file *m, u32 odev)
 {
-	DEBUG_MSG(KERN_INFO
-		  "set_lcd_output_path, iga:%d,out_interface:%d\n",
-		  set_iga, output_interface);
-	switch (set_iga) {
-	case IGA1:
-		viafb_write_reg_mask(CR6B, VIACR, 0x00, BIT3);
-		viafb_write_reg_mask(CR6A, VIACR, 0x08, BIT3);
+	int i, count = 0;
 
-		disable_second_display_channel();
-		break;
+	for (i = 0; i < ARRAY_SIZE(device_mapping); i++) {
+		if (odev & device_mapping[i].device) {
+			if (count > 0)
+				seq_putc(m, ',');
 
-	case IGA2:
-		viafb_write_reg_mask(CR6B, VIACR, 0x00, BIT3);
-		viafb_write_reg_mask(CR6A, VIACR, 0x08, BIT3);
-
-		enable_second_display_channel();
-		break;
+			seq_puts(m, device_mapping[i].name);
+			count++;
+		}
 	}
 
-	switch (output_interface) {
-	case INTERFACE_DVP0:
-		if (set_iga == IGA1) {
-			viafb_write_reg_mask(CR96, VIACR, 0x00, BIT4);
-		} else {
-			viafb_write_reg(CR91, VIACR, 0x00);
-			viafb_write_reg_mask(CR96, VIACR, 0x10, BIT4);
-		}
-		break;
-
-	case INTERFACE_DVP1:
-		if (set_iga == IGA1)
-			viafb_write_reg_mask(CR9B, VIACR, 0x00, BIT4);
-		else {
-			viafb_write_reg(CR91, VIACR, 0x00);
-			viafb_write_reg_mask(CR9B, VIACR, 0x10, BIT4);
-		}
-		break;
-
-	case INTERFACE_DFP_HIGH:
-		if (set_iga == IGA1)
-			viafb_write_reg_mask(CR97, VIACR, 0x00, BIT4);
-		else {
-			viafb_write_reg(CR91, VIACR, 0x00);
-			viafb_write_reg_mask(CR97, VIACR, 0x10, BIT4);
-			viafb_write_reg_mask(CR96, VIACR, 0x10, BIT4);
-		}
-		break;
-
-	case INTERFACE_DFP_LOW:
-		if (set_iga == IGA1)
-			viafb_write_reg_mask(CR99, VIACR, 0x00, BIT4);
-		else {
-			viafb_write_reg(CR91, VIACR, 0x00);
-			viafb_write_reg_mask(CR99, VIACR, 0x10, BIT4);
-			viafb_write_reg_mask(CR9B, VIACR, 0x10, BIT4);
-		}
-
-		break;
-
-	case INTERFACE_DFP:
-		if ((UNICHROME_K8M890 == viaparinfo->chip_info->gfx_chip_name)
-		    || (UNICHROME_P4M890 ==
-		    viaparinfo->chip_info->gfx_chip_name))
-			viafb_write_reg_mask(CR97, VIACR, 0x84,
-				       BIT7 + BIT2 + BIT1 + BIT0);
-		if (set_iga == IGA1) {
-			viafb_write_reg_mask(CR97, VIACR, 0x00, BIT4);
-			viafb_write_reg_mask(CR99, VIACR, 0x00, BIT4);
-		} else {
-			viafb_write_reg(CR91, VIACR, 0x00);
-			viafb_write_reg_mask(CR97, VIACR, 0x10, BIT4);
-			viafb_write_reg_mask(CR99, VIACR, 0x10, BIT4);
-		}
-		break;
-
-	case INTERFACE_LVDS0:
-	case INTERFACE_LVDS0LVDS1:
-		if (set_iga == IGA1)
-			viafb_write_reg_mask(CR99, VIACR, 0x00, BIT4);
-		else
-			viafb_write_reg_mask(CR99, VIACR, 0x10, BIT4);
-
-		break;
-
-	case INTERFACE_LVDS1:
-		if (set_iga == IGA1)
-			viafb_write_reg_mask(CR97, VIACR, 0x00, BIT4);
-		else
-			viafb_write_reg_mask(CR97, VIACR, 0x10, BIT4);
-		break;
-	}
+	seq_putc(m, '\n');
 }
 
 static void load_fix_bit_crtc_reg(void)
@@ -1352,6 +1377,15 @@ void viafb_load_FIFO_reg(int set_iga, int hor_active, int ver_active)
 			    VX855_IGA1_DISPLAY_QUEUE_EXPIRE_NUM;
 		}
 
+		if (viaparinfo->chip_info->gfx_chip_name == UNICHROME_VX900) {
+			iga1_fifo_max_depth = VX900_IGA1_FIFO_MAX_DEPTH;
+			iga1_fifo_threshold = VX900_IGA1_FIFO_THRESHOLD;
+			iga1_fifo_high_threshold =
+			    VX900_IGA1_FIFO_HIGH_THRESHOLD;
+			iga1_display_queue_expire_num =
+			    VX900_IGA1_DISPLAY_QUEUE_EXPIRE_NUM;
+		}
+
 		/* Set Display FIFO Depath Select */
 		reg_value = IGA1_FIFO_DEPTH_SELECT_FORMULA(iga1_fifo_max_depth);
 		viafb_load_reg_num =
@@ -1492,6 +1526,15 @@ void viafb_load_FIFO_reg(int set_iga, int hor_active, int ver_active)
 			    VX855_IGA2_DISPLAY_QUEUE_EXPIRE_NUM;
 		}
 
+		if (viaparinfo->chip_info->gfx_chip_name == UNICHROME_VX900) {
+			iga2_fifo_max_depth = VX900_IGA2_FIFO_MAX_DEPTH;
+			iga2_fifo_threshold = VX900_IGA2_FIFO_THRESHOLD;
+			iga2_fifo_high_threshold =
+			    VX900_IGA2_FIFO_HIGH_THRESHOLD;
+			iga2_display_queue_expire_num =
+			    VX900_IGA2_DISPLAY_QUEUE_EXPIRE_NUM;
+		}
+
 		if (viaparinfo->chip_info->gfx_chip_name == UNICHROME_K800) {
 			/* Set Display FIFO Depath Select */
 			reg_value =
@@ -1579,42 +1622,63 @@ static u32 vx855_encode_pll(struct pll_config pll)
 		| pll.multiplier;
 }
 
+static inline u32 get_pll_internal_frequency(u32 ref_freq,
+	struct pll_config pll)
+{
+	return ref_freq / pll.divisor * pll.multiplier;
+}
+
+static inline u32 get_pll_output_frequency(u32 ref_freq, struct pll_config pll)
+{
+	return get_pll_internal_frequency(ref_freq, pll)>>pll.rshift;
+}
+
+static struct pll_config get_pll_config(struct pll_config *config, int size,
+	int clk)
+{
+	struct pll_config best = config[0];
+	const u32 f0 = 14318180; /* X1 frequency */
+	int i;
+
+	for (i = 1; i < size; i++) {
+		if (abs(get_pll_output_frequency(f0, config[i]) - clk)
+			< abs(get_pll_output_frequency(f0, best) - clk))
+			best = config[i];
+	}
+
+	return best;
+}
+
 u32 viafb_get_clk_value(int clk)
 {
 	u32 value = 0;
-	int i = 0;
 
-	while (i < NUM_TOTAL_PLL_TABLE && clk != pll_value[i].clk)
-		i++;
-
-	if (i == NUM_TOTAL_PLL_TABLE) {
-		printk(KERN_WARNING "viafb_get_clk_value: PLL lookup failed!");
-	} else {
-		switch (viaparinfo->chip_info->gfx_chip_name) {
-		case UNICHROME_CLE266:
-		case UNICHROME_K400:
-			value = cle266_encode_pll(pll_value[i].cle266_pll);
-			break;
-
-		case UNICHROME_K800:
-		case UNICHROME_PM800:
-		case UNICHROME_CN700:
-			value = k800_encode_pll(pll_value[i].k800_pll);
-			break;
-
-		case UNICHROME_CX700:
-		case UNICHROME_CN750:
-		case UNICHROME_K8M890:
-		case UNICHROME_P4M890:
-		case UNICHROME_P4M900:
-		case UNICHROME_VX800:
-			value = k800_encode_pll(pll_value[i].cx700_pll);
-			break;
-
-		case UNICHROME_VX855:
-			value = vx855_encode_pll(pll_value[i].vx855_pll);
-			break;
-		}
+	switch (viaparinfo->chip_info->gfx_chip_name) {
+	case UNICHROME_CLE266:
+	case UNICHROME_K400:
+		value = cle266_encode_pll(get_pll_config(cle266_pll_config,
+			ARRAY_SIZE(cle266_pll_config), clk));
+		break;
+	case UNICHROME_K800:
+	case UNICHROME_PM800:
+	case UNICHROME_CN700:
+		value = k800_encode_pll(get_pll_config(k800_pll_config,
+			ARRAY_SIZE(k800_pll_config), clk));
+		break;
+	case UNICHROME_CX700:
+	case UNICHROME_CN750:
+	case UNICHROME_K8M890:
+	case UNICHROME_P4M890:
+	case UNICHROME_P4M900:
+	case UNICHROME_VX800:
+		value = k800_encode_pll(get_pll_config(cx700_pll_config,
+			ARRAY_SIZE(cx700_pll_config), clk));
+		break;
+	case UNICHROME_VX855:
+	case UNICHROME_VX900:
+		value = vx855_encode_pll(get_pll_config(vx855_pll_config,
+			ARRAY_SIZE(vx855_pll_config), clk));
+		break;
 	}
 
 	return value;
@@ -1645,6 +1709,7 @@ void viafb_set_vclock(u32 clk, int set_iga)
 		case UNICHROME_P4M900:
 		case UNICHROME_VX800:
 		case UNICHROME_VX855:
+		case UNICHROME_VX900:
 			via_write_reg(VIASR, SR44, (clk & 0x0000FF));
 			via_write_reg(VIASR, SR45, (clk & 0x00FF00) >> 8);
 			via_write_reg(VIASR, SR46, (clk & 0xFF0000) >> 16);
@@ -1671,6 +1736,7 @@ void viafb_set_vclock(u32 clk, int set_iga)
 		case UNICHROME_P4M900:
 		case UNICHROME_VX800:
 		case UNICHROME_VX855:
+		case UNICHROME_VX900:
 			via_write_reg(VIASR, SR4A, (clk & 0x0000FF));
 			via_write_reg(VIASR, SR4B, (clk & 0x00FF00) >> 8);
 			via_write_reg(VIASR, SR4C, (clk & 0xFF0000) >> 16);
@@ -1688,8 +1754,8 @@ void viafb_set_vclock(u32 clk, int set_iga)
 	}
 
 	if (set_iga == IGA2) {
-		viafb_write_reg_mask(SR40, VIASR, 0x01, BIT0);
-		viafb_write_reg_mask(SR40, VIASR, 0x00, BIT0);
+		viafb_write_reg_mask(SR40, VIASR, 0x04, BIT2);
+		viafb_write_reg_mask(SR40, VIASR, 0x00, BIT2);
 	}
 
 	/* Fire! */
@@ -1936,14 +2002,15 @@ void viafb_fill_crtc_timing(struct crt_mode_table *crt_table,
 	int i;
 	int index = 0;
 	int h_addr, v_addr;
-	u32 pll_D_N;
-	u8 polarity = 0;
+	u32 pll_D_N, clock, refresh = viafb_refresh;
+
+	if (viafb_SAMM_ON && set_iga == IGA2)
+		refresh = viafb_refresh1;
 
 	for (i = 0; i < video_mode->mode_array; i++) {
 		index = i;
 
-		if (crt_table[i].refresh_rate == viaparinfo->
-			crt_setting_info->refresh_rate)
+		if (crt_table[i].refresh_rate == refresh)
 			break;
 	}
 
@@ -1954,7 +2021,7 @@ void viafb_fill_crtc_timing(struct crt_mode_table *crt_table,
 	if ((viafb_LCD_ON | viafb_DVI_ON)
 	    && video_mode->crtc[0].crtc.hor_addr == 640
 	    && video_mode->crtc[0].crtc.ver_addr == 480
-	    && viaparinfo->crt_setting_info->refresh_rate == 60) {
+	    && refresh == 60) {
 		/* The border is 8 pixels. */
 		crt_reg.hor_blank_start = crt_reg.hor_blank_start - 8;
 
@@ -1964,14 +2031,6 @@ void viafb_fill_crtc_timing(struct crt_mode_table *crt_table,
 
 	h_addr = crt_reg.hor_addr;
 	v_addr = crt_reg.ver_addr;
-
-	/* update polarity for CRT timing */
-	if (crt_table[index].h_sync_polarity == NEGATIVE)
-		polarity |= BIT6;
-	if (crt_table[index].v_sync_polarity == NEGATIVE)
-		polarity |= BIT7;
-	via_write_misc_reg_mask(polarity, BIT6 | BIT7);
-
 	if (set_iga == IGA1) {
 		viafb_unlock_crt();
 		viafb_write_reg(CR09, VIACR, 0x00);	/*initial CR09=0 */
@@ -1998,20 +2057,21 @@ void viafb_fill_crtc_timing(struct crt_mode_table *crt_table,
 	    && (viaparinfo->chip_info->gfx_chip_name != UNICHROME_K400))
 		viafb_load_FIFO_reg(set_iga, h_addr, v_addr);
 
-	pll_D_N = viafb_get_clk_value(crt_table[index].clk);
+	clock = crt_reg.hor_total * crt_reg.ver_total
+		* crt_table[index].refresh_rate;
+	pll_D_N = viafb_get_clk_value(clock);
 	DEBUG_MSG(KERN_INFO "PLL=%x", pll_D_N);
 	viafb_set_vclock(pll_D_N, set_iga);
 
 }
 
-void viafb_init_chip_info(int chip_type)
+void __devinit viafb_init_chip_info(int chip_type)
 {
 	init_gfx_chip_info(chip_type);
 	init_tmds_chip_info();
 	init_lvds_chip_info();
 
 	viaparinfo->crt_setting_info->iga_path = IGA1;
-	viaparinfo->crt_setting_info->refresh_rate = viafb_refresh;
 
 	/*Set IGA path for each device */
 	viafb_set_iga_path();
@@ -2024,29 +2084,18 @@ void viafb_init_chip_info(int chip_type)
 		viaparinfo->lvds_setting_info->lcd_mode;
 }
 
-void viafb_update_device_setting(int hres, int vres,
-	int bpp, int vmode_refresh, int flag)
+void viafb_update_device_setting(int hres, int vres, int bpp, int flag)
 {
 	if (flag == 0) {
-		viaparinfo->crt_setting_info->h_active = hres;
-		viaparinfo->crt_setting_info->v_active = vres;
-		viaparinfo->crt_setting_info->bpp = bpp;
-		viaparinfo->crt_setting_info->refresh_rate =
-			vmode_refresh;
-
 		viaparinfo->tmds_setting_info->h_active = hres;
 		viaparinfo->tmds_setting_info->v_active = vres;
 
 		viaparinfo->lvds_setting_info->h_active = hres;
 		viaparinfo->lvds_setting_info->v_active = vres;
 		viaparinfo->lvds_setting_info->bpp = bpp;
-		viaparinfo->lvds_setting_info->refresh_rate =
-			vmode_refresh;
 		viaparinfo->lvds_setting_info2->h_active = hres;
 		viaparinfo->lvds_setting_info2->v_active = vres;
 		viaparinfo->lvds_setting_info2->bpp = bpp;
-		viaparinfo->lvds_setting_info2->refresh_rate =
-			vmode_refresh;
 	} else {
 
 		if (viaparinfo->tmds_setting_info->iga_path == IGA2) {
@@ -2058,20 +2107,16 @@ void viafb_update_device_setting(int hres, int vres,
 			viaparinfo->lvds_setting_info->h_active = hres;
 			viaparinfo->lvds_setting_info->v_active = vres;
 			viaparinfo->lvds_setting_info->bpp = bpp;
-			viaparinfo->lvds_setting_info->refresh_rate =
-				vmode_refresh;
 		}
 		if (IGA2 == viaparinfo->lvds_setting_info2->iga_path) {
 			viaparinfo->lvds_setting_info2->h_active = hres;
 			viaparinfo->lvds_setting_info2->v_active = vres;
 			viaparinfo->lvds_setting_info2->bpp = bpp;
-			viaparinfo->lvds_setting_info2->refresh_rate =
-				vmode_refresh;
 		}
 	}
 }
 
-static void init_gfx_chip_info(int chip_type)
+static void __devinit init_gfx_chip_info(int chip_type)
 {
 	u8 tmp;
 
@@ -2111,6 +2156,7 @@ static void init_gfx_chip_info(int chip_type)
 	switch (viaparinfo->chip_info->gfx_chip_name) {
 	case UNICHROME_VX800:
 	case UNICHROME_VX855:
+	case UNICHROME_VX900:
 		viaparinfo->chip_info->twod_engine = VIA_2D_ENG_M1;
 		break;
 	case UNICHROME_K8M890:
@@ -2123,7 +2169,7 @@ static void init_gfx_chip_info(int chip_type)
 	}
 }
 
-static void init_tmds_chip_info(void)
+static void __devinit init_tmds_chip_info(void)
 {
 	viafb_tmds_trasmitter_identify();
 
@@ -2168,7 +2214,7 @@ static void init_tmds_chip_info(void)
 		&viaparinfo->shared->tmds_setting_info);
 }
 
-static void init_lvds_chip_info(void)
+static void __devinit init_lvds_chip_info(void)
 {
 	viafb_lvds_trasmitter_identify();
 	viafb_init_lcd_size();
@@ -2202,7 +2248,7 @@ static void init_lvds_chip_info(void)
 		  viaparinfo->chip_info->lvds_chip_info.output_interface);
 }
 
-void viafb_init_dac(int set_iga)
+void __devinit viafb_init_dac(int set_iga)
 {
 	int i;
 	u8 tmp;
@@ -2275,11 +2321,24 @@ static void set_display_channel(void)
 	}
 }
 
+static u8 get_sync(struct fb_info *info)
+{
+	u8 polarity = 0;
+
+	if (!(info->var.sync & FB_SYNC_HOR_HIGH_ACT))
+		polarity |= VIA_HSYNC_NEGATIVE;
+	if (!(info->var.sync & FB_SYNC_VERT_HIGH_ACT))
+		polarity |= VIA_VSYNC_NEGATIVE;
+	return polarity;
+}
+
 int viafb_setmode(struct VideoModeTable *vmode_tbl, int video_bpp,
 	struct VideoModeTable *vmode_tbl1, int video_bpp1)
 {
 	int i, j;
 	int port;
+	u32 devices = viaparinfo->shared->iga1_devices
+		| viaparinfo->shared->iga2_devices;
 	u8 value, index, mask;
 	struct crt_mode_table *crt_timing;
 	struct crt_mode_table *crt_timing1 = NULL;
@@ -2322,11 +2381,14 @@ int viafb_setmode(struct VideoModeTable *vmode_tbl, int video_bpp,
 		break;
 
 	case UNICHROME_VX855:
+	case UNICHROME_VX900:
 		viafb_write_regx(VX855_ModeXregs, NUM_TOTAL_VX855_ModeXregs);
 		break;
 	}
 
+	viafb_write_regx(scaling_parameters, ARRAY_SIZE(scaling_parameters));
 	device_off();
+	via_set_state(devices, VIA_STATE_OFF);
 
 	/* Fill VPIT Parameters */
 	/* Write Misc Register */
@@ -2337,7 +2399,6 @@ int viafb_setmode(struct VideoModeTable *vmode_tbl, int video_bpp,
 		via_write_reg(VIASR, i, VPIT.SR[i - 1]);
 
 	viafb_write_reg_mask(0x15, VIASR, 0xA2, 0xA2);
-	viafb_set_iga_path();
 
 	/* Write CRTC */
 	viafb_fill_crtc_timing(crt_timing, vmode_tbl, video_bpp / 8, IGA1);
@@ -2377,6 +2438,13 @@ int viafb_setmode(struct VideoModeTable *vmode_tbl, int video_bpp,
 	via_set_primary_color_depth(viaparinfo->depth);
 	via_set_secondary_color_depth(viafb_dual_fb ? viaparinfo1->depth
 		: viaparinfo->depth);
+	via_set_source(viaparinfo->shared->iga1_devices, IGA1);
+	via_set_source(viaparinfo->shared->iga2_devices, IGA2);
+	if (viaparinfo->shared->iga2_devices)
+		enable_second_display_channel();
+	else
+		disable_second_display_channel();
+
 	/* Update Refresh Rate Setting */
 
 	/* Clear On Screen */
@@ -2393,8 +2461,6 @@ int viafb_setmode(struct VideoModeTable *vmode_tbl, int video_bpp,
 				video_bpp / 8,
 				viaparinfo->crt_setting_info->iga_path);
 		}
-
-		set_crt_output_path(viaparinfo->crt_setting_info->iga_path);
 
 		/* Patch if set_hres is not 8 alignment (1366) to viafb_setmode
 		to 8 alignment (1368),there is several pixels (2 pixels)
@@ -2482,10 +2548,16 @@ int viafb_setmode(struct VideoModeTable *vmode_tbl, int video_bpp,
 			viafb_DeviceStatus = CRT_Device;
 	}
 	device_on();
+	if (!viafb_dual_fb)
+		via_set_sync_polarity(devices, get_sync(viafbinfo));
+	else {
+		via_set_sync_polarity(viaparinfo->shared->iga1_devices,
+			get_sync(viafbinfo));
+		via_set_sync_polarity(viaparinfo->shared->iga2_devices,
+			get_sync(viafbinfo1));
+	}
 
-	if (viafb_SAMM_ON == 1)
-		viafb_write_reg_mask(CR6A, VIACR, 0xC0, BIT6 + BIT7);
-
+	via_set_state(devices, VIA_STATE_ON);
 	device_screen_on();
 	return 1;
 }
@@ -2493,62 +2565,57 @@ int viafb_setmode(struct VideoModeTable *vmode_tbl, int video_bpp,
 int viafb_get_pixclock(int hres, int vres, int vmode_refresh)
 {
 	int i;
+	struct crt_mode_table *best;
+	struct VideoModeTable *vmode = viafb_get_mode(hres, vres);
 
-	for (i = 0; i < NUM_TOTAL_RES_MAP_REFRESH; i++) {
-		if ((hres == res_map_refresh_tbl[i].hres)
-		    && (vres == res_map_refresh_tbl[i].vres)
-		    && (vmode_refresh == res_map_refresh_tbl[i].vmode_refresh))
-			return res_map_refresh_tbl[i].pixclock;
+	if (!vmode)
+		return RES_640X480_60HZ_PIXCLOCK;
+
+	best = &vmode->crtc[0];
+	for (i = 1; i < vmode->mode_array; i++) {
+		if (abs(vmode->crtc[i].refresh_rate - vmode_refresh)
+			< abs(best->refresh_rate - vmode_refresh))
+			best = &vmode->crtc[i];
 	}
-	return RES_640X480_60HZ_PIXCLOCK;
 
+	return 1000000000 / (best->crtc.hor_total * best->crtc.ver_total)
+		* 1000 / best->refresh_rate;
 }
 
 int viafb_get_refresh(int hres, int vres, u32 long_refresh)
 {
-#define REFRESH_TOLERANCE 3
-	int i, nearest = -1, diff = REFRESH_TOLERANCE;
-	for (i = 0; i < NUM_TOTAL_RES_MAP_REFRESH; i++) {
-		if ((hres == res_map_refresh_tbl[i].hres)
-		    && (vres == res_map_refresh_tbl[i].vres)
-		    && (diff > (abs(long_refresh -
-		    res_map_refresh_tbl[i].vmode_refresh)))) {
-			diff = abs(long_refresh - res_map_refresh_tbl[i].
-				vmode_refresh);
-			nearest = i;
-		}
+	int i;
+	struct crt_mode_table *best;
+	struct VideoModeTable *vmode = viafb_get_mode(hres, vres);
+
+	if (!vmode)
+		return 60;
+
+	best = &vmode->crtc[0];
+	for (i = 1; i < vmode->mode_array; i++) {
+		if (abs(vmode->crtc[i].refresh_rate - long_refresh)
+			< abs(best->refresh_rate - long_refresh))
+			best = &vmode->crtc[i];
 	}
-#undef REFRESH_TOLERANCE
-	if (nearest > 0)
-		return res_map_refresh_tbl[nearest].vmode_refresh;
-	return 60;
+
+	if (abs(best->refresh_rate - long_refresh) > 3)
+		return 60;
+
+	return best->refresh_rate;
 }
 
 static void device_off(void)
 {
-	viafb_crt_disable();
 	viafb_dvi_disable();
 	viafb_lcd_disable();
 }
 
 static void device_on(void)
 {
-	if (viafb_CRT_ON == 1)
-		viafb_crt_enable();
 	if (viafb_DVI_ON == 1)
 		viafb_dvi_enable();
 	if (viafb_LCD_ON == 1)
 		viafb_lcd_enable();
-}
-
-void viafb_crt_disable(void)
-{
-	viafb_write_reg_mask(CR36, VIACR, BIT5 + BIT4, BIT5 + BIT4);
-}
-
-void viafb_crt_enable(void)
-{
-	viafb_write_reg_mask(CR36, VIACR, 0x0, BIT5 + BIT4);
 }
 
 static void enable_second_display_channel(void)
@@ -2566,7 +2633,6 @@ static void disable_second_display_channel(void)
 	viafb_write_reg_mask(CR6A, VIACR, 0x00, BIT7);
 	viafb_write_reg_mask(CR6A, VIACR, BIT6, BIT6);
 }
-
 
 void viafb_set_dpa_gfx(int output_interface, struct GFX_DPA_SETTING\
 					*p_gfx_dpa_setting)
@@ -2652,4 +2718,9 @@ void viafb_fill_var_timing_info(struct fb_var_screeninfo *var, int refresh,
 	    crt_reg.ver_total - (crt_reg.ver_sync_start + crt_reg.ver_sync_end);
 	var->lower_margin = crt_reg.ver_sync_start - crt_reg.ver_addr;
 	var->vsync_len = crt_reg.ver_sync_end;
+	var->sync = 0;
+	if (crt_timing[index].h_sync_polarity == POSITIVE)
+		var->sync |= FB_SYNC_HOR_HIGH_ACT;
+	if (crt_timing[index].v_sync_polarity == POSITIVE)
+		var->sync |= FB_SYNC_VERT_HIGH_ACT;
 }

@@ -1,4 +1,3 @@
-/* 2011-06-10: File changed by Sony Corporation */
 /*
  *
  * Includes for cdc-acm.c
@@ -57,12 +56,13 @@
 
 #define ACM_COUNTRY_SETTING	0x02
 
+
 /*
  * Internal driver structures.
  */
 
 /*
- * The only reason to have several buffers is to accomodate assumptions
+ * The only reason to have several buffers is to accommodate assumptions
  * in line disciplines. They ask for empty space amount, receive our URB size,
  * and proceed to issue several 1-character writes, assuming they will fit.
  * The very first write takes a complete URB. Fortunately, this only happens
@@ -139,6 +139,10 @@ struct acm {
 	unsigned int is_int_ep:1;			/* interrupt endpoints contrary to spec used */
 	u8 bInterval;
 	struct acm_wb *delayed_wb;			/* write queued for a device about to be woken */
+	struct usb_ctrlrequest *irq;			/* enorcar added for get_encapsulated_command */
+	struct urb *response;
+	u8 *inbuf;
+	unsigned int bMaxPacketSize0;
 };
 
 #define CDC_DATA_INTERFACE_TYPE	0x0a
@@ -148,3 +152,5 @@ struct acm {
 #define SINGLE_RX_URB			2
 #define NO_CAP_LINE			4
 #define NOT_A_MODEM			8
+#define NO_DATA_INTERFACE		16
+#define NOT_REAL_ACM			32

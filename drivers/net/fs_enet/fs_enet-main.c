@@ -40,6 +40,7 @@
 #include <linux/of_mdio.h>
 #include <linux/of_platform.h>
 #include <linux/of_gpio.h>
+#include <linux/of_net.h>
 
 #include <linux/vmalloc.h>
 #include <asm/pgtable.h>
@@ -997,15 +998,20 @@ static const struct net_device_ops fs_enet_netdev_ops = {
 #endif
 };
 
-static int __devinit fs_enet_probe(struct platform_device *ofdev,
-                                   const struct of_device_id *match)
+static struct of_device_id fs_enet_match[];
+static int __devinit fs_enet_probe(struct platform_device *ofdev)
 {
+	const struct of_device_id *match;
 	struct net_device *ndev;
 	struct fs_enet_private *fep;
 	struct fs_platform_info *fpi;
 	const u32 *data;
 	const u8 *mac_addr;
 	int privsize, len, ret = -ENODEV;
+
+	match = of_match_device(fs_enet_match, &ofdev->dev);
+	if (!match)
+		return -EINVAL;
 
 	fpi = kzalloc(sizeof(*fpi), GFP_KERNEL);
 	if (!fpi)
@@ -1036,7 +1042,7 @@ static int __devinit fs_enet_probe(struct platform_device *ofdev,
 	ndev = alloc_etherdev(privsize);
 	if (!ndev) {
 		ret = -ENOMEM;
-		goto out_free_fpi;
+		goto out_put;
 	}
 
 	SET_NETDEV_DEV(ndev, &ofdev->dev);
@@ -1099,6 +1105,7 @@ out_cleanup_data:
 out_free_dev:
 	free_netdev(ndev);
 	dev_set_drvdata(&ofdev->dev, NULL);
+out_put:
 	of_node_put(fpi->phy_node);
 out_free_fpi:
 	kfree(fpi);
@@ -1154,7 +1161,7 @@ static struct of_device_id fs_enet_match[] = {
 };
 MODULE_DEVICE_TABLE(of, fs_enet_match);
 
-static struct of_platform_driver fs_enet_driver = {
+static struct platform_driver fs_enet_driver = {
 	.driver = {
 		.owner = THIS_MODULE,
 		.name = "fs_enet",
@@ -1166,12 +1173,12 @@ static struct of_platform_driver fs_enet_driver = {
 
 static int __init fs_init(void)
 {
-	return of_register_platform_driver(&fs_enet_driver);
+	return platform_driver_register(&fs_enet_driver);
 }
 
 static void __exit fs_cleanup(void)
 {
-	of_unregister_platform_driver(&fs_enet_driver);
+	platform_driver_unregister(&fs_enet_driver);
 }
 
 #ifdef CONFIG_NET_POLL_CONTROLLER

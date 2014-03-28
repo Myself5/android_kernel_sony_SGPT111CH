@@ -1,4 +1,3 @@
-# 2011-06-10: File added and changed by Sony Corporation
 comment "SNSC related options"
 	depends on SNSC
 

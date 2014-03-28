@@ -1,6 +1,5 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.
@@ -28,6 +27,11 @@
 #define PRINT_WIRELESSPOWER(x)
 #endif
 
+#undef EXPOSE_WWAN
+#if defined(CONFIG_MACH_TXS03)
+#define EXPOSE_WWAN
+#endif
+
 static ssize_t sysfswirelesspower_show(struct kobject *kobj,
 				struct kobj_attribute *attr, char *buf);
 
@@ -38,14 +42,35 @@ static ssize_t sysfswirelesspower_store(struct kobject *kobj,
 static struct kobj_attribute wirelesspower_gps_attr =
 	__ATTR(gps, 0400, sysfswirelesspower_show, sysfswirelesspower_store);
 
+#if defined(EXPOSE_WWAN)
+static struct kobj_attribute wirelesspower_wwan_attr =
+	__ATTR(wwan, 0400, sysfswirelesspower_show, sysfswirelesspower_store);
+
+static struct kobj_attribute wirelesspower_wwan_rf_attr =
+	__ATTR(wwan_rf, 0400, sysfswirelesspower_show, sysfswirelesspower_store);
+#endif
+
 // return the module type based on the module name.
 static int GetModuleType(const char *str)
 {
 	WPCModuleType type;
 	
-	if (!strcmp(str, "gps")) {
+	if (!strcmp(str, "gps"))
+	{
 		type = WPC_MODULE_GPS;
-	} else {
+	}
+#if defined(EXPOSE_WWAN)
+	else if (!strcmp(str, "wwan"))
+	{
+		type = WPC_MODULE_WWAN;
+	}
+	else if (!strcmp(str, "wwan_rf"))
+	{
+		type = WPC_MODULE_WWAN_RF;
+	}
+#endif
+	else
+	{
 		type = WPC_MODULE_NONE;
 		PRINT_WIRELESSPOWER(("\r\n Invalid Module type:%s... Find out reason\r",str));
 	}
@@ -106,6 +131,10 @@ static ssize_t sysfswirelesspower_store(struct kobject *kobj,
 
 static struct attribute *wirelesspower_attrs[] = {
 	&wirelesspower_gps_attr.attr,
+#if defined(EXPOSE_WWAN)
+	&wirelesspower_wwan_attr.attr,
+	&wirelesspower_wwan_rf_attr.attr,
+#endif
 	NULL
 };
 

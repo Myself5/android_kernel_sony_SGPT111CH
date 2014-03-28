@@ -131,6 +131,9 @@ struct mmc_request {
 struct mmc_host;
 struct mmc_card;
 
+extern int mmc_interrupt_hpi(struct mmc_card *);
+extern int mmc_bkops_start(struct mmc_card *card, bool is_synchronous);
+
 extern void mmc_wait_for_req(struct mmc_host *, struct mmc_request *);
 extern int mmc_wait_for_cmd(struct mmc_host *, struct mmc_command *, int);
 extern int mmc_wait_for_app_cmd(struct mmc_host *, struct mmc_card *,
@@ -154,11 +157,14 @@ extern int mmc_can_secure_erase_trim(struct mmc_card *card);
 extern int mmc_erase_group_aligned(struct mmc_card *card, unsigned int from,
 				   unsigned int nr);
 
+extern int mmc_set_blocklen(struct mmc_card *card, unsigned int blocklen);
+
 extern void mmc_set_data_timeout(struct mmc_data *, const struct mmc_card *);
 extern unsigned int mmc_align_data_size(struct mmc_card *, unsigned int);
 
 extern int __mmc_claim_host(struct mmc_host *host, atomic_t *abort);
 extern void mmc_release_host(struct mmc_host *host);
+extern void mmc_do_release_host(struct mmc_host *host);
 extern int mmc_try_claim_host(struct mmc_host *host);
 
 /**

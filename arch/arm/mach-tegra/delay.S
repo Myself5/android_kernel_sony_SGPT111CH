@@ -21,7 +21,8 @@
 #include <asm/assembler.h>
 #include <mach/iomap.h>
 #include <mach/io.h>
-#include "power-macros.S"
+
+#include "asm_macros.h"
 
     .text
 

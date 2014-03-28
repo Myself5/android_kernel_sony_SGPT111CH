@@ -1,4 +1,3 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
 /*
  * Copyright (C) 2011 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
@@ -24,16 +23,15 @@
 #include <asm/ioctls.h>
 
 static struct file* tty_filp;
-static DECLARE_MUTEX(tty_filp_open_mutex);
+//static DECLARE_MUTEX(tty_filp_open_mutex);
+static DEFINE_SEMAPHORE(tty_filp_open_mutex);
 
-#define LOCKED_STATEMENT(mutex, statement)			\
-	do {							\
-		if(0 != down_interruptible(mutex)) break;	\
-		do {						\
-			statement;                              \
-		} while(0);					\
-		up(mutex);					\
-	} while(0)
+#define LOCKED_STATEMENT(mutex, statement)	\
+	down(mutex);				\
+	do {					\
+		statement;			\
+	} while(0);				\
+	up(mutex);
 
 static long ec_ipc_tty_ioctl(struct file* filp, unsigned int cmd, unsigned long arg)
 {

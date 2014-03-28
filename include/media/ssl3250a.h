@@ -1,40 +1,38 @@
-/**
- * Copyright (c) 2011 NVIDIA Corporation.  All rights reserved.
+/* Copyright (C) 2011 NVIDIA Corporation.
  *
- * NVIDIA Corporation and its licensors retain all intellectual property
- * and proprietary rights in and to this software and related documentation
- * and any modifications thereto.  Any use, reproduction, disclosure or
- * distribution of this software and related documentation without an express
- * license agreement from NVIDIA Corporation is strictly prohibited.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
+ * 02111-1307, USA
  */
 
 #ifndef __SSL3250A_H__
 #define __SSL3250A_H__
 
-#include <linux/ioctl.h> /* For IOCTL macros */
+#include <media/nvc_torch.h>
 
-#define SSL3250A_IOCTL_MODE_SHUTDOWN	_IOW('o', 1, __u8)
-#define SSL3250A_IOCTL_MODE_STANDBY	_IOW('o', 2, __u8)
-#define SSL3250A_IOTCL_MODE_TORCH	_IOW('o', 3, __u8)
-#define SSL3250A_IOCTL_MODE_FLASH	_IOW('o', 4, __u8)
-#define SSL3250A_IOCTL_MODE_LED		_IOW('o', 5, __u8)
-#define SSL3250A_IOCTL_STRB		_IOW('o', 6, __u8)
-#define SSL3250A_IOCTL_TIMER		_IOW('o', 7, __u8)
+#define SSL3250A_MAX_TORCH_LEVEL	11
+#define SSL3250A_MAX_FLASH_LEVEL	20
 
-#ifdef __KERNEL__
 struct ssl3250a_platform_data {
-	int config;
-	int max_amp_indic;
-	int max_amp_torch;
-	int max_amp_flash;
-	int (*init)(void);
-	void (*exit)(void);
-	int (*gpio_act)(int);
-	int (*gpio_en1)(int);
-	int (*gpio_en2)(int);
-	int (*gpio_strb)(int);
+	unsigned cfg; /* use the NVC_CFG_ defines */
+	unsigned num; /* see implementation notes in driver */
+	unsigned sync; /* see implementation notes in driver */
+	const char *dev_name; /* see implementation notes in driver */
+	struct nvc_torch_pin_state (*pinstate); /* see notes in driver */
+	unsigned max_amp_torch; /* maximum torch value allowed */
+	unsigned max_amp_flash; /* maximum flash value allowed */
+	unsigned gpio_act; /* GPIO connected to the ACT signal */
 };
-#endif /* __KERNEL__ */
 
 #endif /* __SSL3250A_H__ */
 

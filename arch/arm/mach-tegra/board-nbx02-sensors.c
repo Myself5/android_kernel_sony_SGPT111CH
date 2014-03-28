@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * arch/arm/mach-tegra/board-nbx02-sensors.c
  *
@@ -33,7 +33,7 @@
  */
 
 #include <linux/i2c.h>
-#include <linux/nct1008.h>
+#include <linux/nct1008_hc.h>
 
 #include <mach/gpio.h>
 
@@ -46,7 +46,11 @@
 #include <media/tc35892.h>
 #include <linux/regulator/consumer.h>
 #include <linux/err.h>
-#include <mach/tegra2_fuse.h>
+#include <mach/tegra_odm_fuses.h>
+
+#include <linux/lis331dlh_1.h>
+#include <linux/ami304.h>
+#include <linux/l3g4200dh.h>
 
 #define NCT1008_THERM2_GPIO	TEGRA_GPIO_PN5
 
@@ -68,6 +72,16 @@ static void nbx02_nct1008_init(void)
 	gpio_direction_input(NCT1008_THERM2_GPIO);
 }
 
+static bool throttling_enable = false;
+
+static void xxx_tegra_throttling_enable(bool enable)
+{
+	if ( throttling_enable != enable ) {
+		throttling_enable = enable;
+		tegra_throttling_enable(enable);
+	}
+}
+
 static struct nct1008_platform_data nbx02_nct1008_pdata = {
 	.supported_hwrev = true,
 	.ext_range = true,
@@ -78,7 +92,7 @@ static struct nct1008_platform_data nbx02_nct1008_pdata = {
 	.shutdown_local_limit = 80,
 	.throttling_ext_limit = 75,
 	.throttling_local_limit = 65,
-	.alarm_fn = tegra_throttling_enable,
+	.alarm_fn = xxx_tegra_throttling_enable,
 };
 
 static struct i2c_board_info nbx02_i2c4_board_info[] = {
@@ -89,20 +103,50 @@ static struct i2c_board_info nbx02_i2c4_board_info[] = {
 	},
 };
 
+static struct lis331dlh_platform_data nbx02_lis331dlh_pdata = {
+	.transformation_matrix = {
+		-1,  0,  0,
+		 0,  1,  0,
+		 0,  0, -1,
+	},
+};
+
+static struct ami304_platform_data nbx02_ami304_pdata = {
+	.transformation_matrix = {
+		-1,  0,  0,
+		 0,  1,  0,
+		 0,  0, -1,
+	},
+};
+
+static struct l3g4200dh_platform_data nbx02_l3g4200dh_pdata = {
+	.transformation_matrix = {
+		-1,  0,  0,
+		 0,  1,  0,
+		 0,  0, -1,
+	},
+#ifdef CONFIG_NBX_L3G4200DH_HIGHSPEED
+	.odr = 100,
+#endif
+};
+
 static struct i2c_board_info nbx02_i2c_sensors_info[] = {
-#ifdef CONFIG_INPUT_NBX_ACCELEROMETER
+#ifdef CONFIG_INPUT_LIS331DLH
 	{
-		I2C_BOARD_INFO("nbx_accelerometer", 0x18), /* LIS331DLH */
+		I2C_BOARD_INFO("lis331dlh", 0x18), /* LIS331DLH */
+		.platform_data = &nbx02_lis331dlh_pdata,
 	},
 #endif
-#ifdef CONFIG_INPUT_NBX_MAGNETOMETER
+#ifdef CONFIG_INPUT_AMI304
 	{
-		I2C_BOARD_INFO("nbx_magnetometer", 0x0f), /* AMI304 */
+		I2C_BOARD_INFO("ami304", 0x0f), /* AMI304 */
+		.platform_data = &nbx02_ami304_pdata,
 	},
 #endif
-#ifdef CONFIG_INPUT_NBX_GYROSCOPE
+#ifdef CONFIG_INPUT_L3G4200DH
 	{
-		I2C_BOARD_INFO("nbx_gyroscope", 0x68), /* L3G4200DH */
+		I2C_BOARD_INFO("l3g4200dh", 0x68), /* L3G4200DH */
+		.platform_data = &nbx02_l3g4200dh_pdata,
 	},
 #endif
 };
@@ -246,7 +290,7 @@ int __init nbx02_sensors_init(void)
 	i2c_register_board_info(3, nbx02_i2c4_board_info,
 		ARRAY_SIZE(nbx02_i2c4_board_info));
 
-#if defined(CONFIG_INPUT_NBX_ACCELEROMETER) || defined(CONFIG_INPUT_NBX_MAGNETOMETER) || defined(CONFIG_INPUT_NBX_GYROSCOPE)
+#if defined(CONFIG_INPUT_LIS331DLH) || defined(CONFIG_INPUT_AMI304) || defined(CONFIG_INPUT_L3G4200DH)
 	i2c_register_board_info(0, nbx02_i2c_sensors_info,
 		ARRAY_SIZE(nbx02_i2c_sensors_info));
 #endif

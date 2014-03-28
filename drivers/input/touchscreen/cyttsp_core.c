@@ -1,4 +1,4 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * Core Source for:
  * Cypress TrueTouch(TM) Standard Product (TTSP) touchscreen drivers.
@@ -44,7 +44,7 @@
 #include <linux/slab.h>
 
 //#define USE_DEEP_SLEEP_CMD
-#define DEBUG_INFO_TP
+//#define DEBUG_INFO_TP
 
 /* Bootloader File 0 offset */
 #define CY_BL_FILE0       0x00
@@ -96,6 +96,7 @@
 #define CY_OPERATE_MODE             0x00 /* write to hst_mode_reg */
 #define CY_SYSINFO_MODE             0x10 /* write to hst_mode reg */
 #define CY_BL_MODE                  0X10 /* write to tt_mode reg */
+#define LOW_POWER_MODE              0X04 /* write to tt_mode reg */
 /* power mode select bits */
 #define CY_SOFT_RESET_MODE          0x01 /* return to Bootloader mode */
 #define CY_DEEP_SLEEP_MODE          0x02
@@ -376,7 +377,7 @@ static int cyttsp_exit_bl_mode(struct cyttsp *ts)
 static int cyttsp_set_operational_mode(struct cyttsp *ts)
 {
 	int retval;
-	u8 cmd = CY_OPERATE_MODE;
+	u8 cmd = (CY_OPERATE_MODE | LOW_POWER_MODE);
 
 	retval = ttsp_write_block_data(ts, CY_REG_BASE,
 		sizeof(cmd), &cmd, 0x67, true);
@@ -391,7 +392,7 @@ static int cyttsp_set_sysinfo_mode(struct cyttsp *ts)
 {
 	int retval;
 	int tries;
-	u8 cmd = CY_SYSINFO_MODE;
+	u8 cmd = (CY_SYSINFO_MODE | LOW_POWER_MODE);
 
 	memset(&(ts->sysinfo_data), 0, sizeof(struct cyttsp_sysinfo_data));
 
@@ -534,6 +535,13 @@ static void handle_multi_touch(struct cyttsp_trk *cur_trk, struct cyttsp *ts)
 report:	
 #endif /* DEBUG_INFO_TP */
 
+	for (id = 0; id < CY_NUM_TRK_ID; id++) {
+		if (cur_trk[id].tch) {
+			input_report_key(ts->input, BTN_TOUCH, 1);
+			break;
+		}
+	}
+
 	/* terminate any previous touch where the track
 	 * is missing from the current event
 	 */
@@ -558,6 +566,7 @@ report:
 			ts->prv_trk[id] = cur_trk[id];
 			cnt++;
 		} else if (ts->prv_trk[id].tch) {
+#if 0
 			/* put lift-off previous track data */
 			input_report_abs(ts->input,
 				ABS_MT_POSITION_X, ts->prv_trk[id].x);
@@ -566,6 +575,7 @@ report:
 			input_report_abs(ts->input,
 				ABS_MT_TOUCH_MAJOR, CY_NTCH);
 			input_mt_sync(ts->input);
+#endif
 
 			dev_dbg(ts->dev, "%s: MT% 2d: X=%d Y=%d Z=%d liftoff\n",
 				__func__, id,
@@ -574,13 +584,18 @@ report:
 				CY_NTCH);
 			/* clear previous touch indication */
 			ts->prv_trk[id].tch = CY_NTCH;
+#if 0
 			cnt++;
+#endif
 		}
 	}
 
+	if ( cnt == 0 ) {
+		input_mt_sync(ts->input);
+	}
+
 	/* signal the view motion event */
-	if (cnt)
-		input_sync(ts->input);
+	input_sync(ts->input);
 }
 
 /* read xy_data for all current touches */
@@ -1011,6 +1026,7 @@ void *cyttsp_core_init(struct cyttsp_bus_ops *bus_ops, struct device *dev)
 	__set_bit(EV_SYN, input_device->evbit);
 	__set_bit(EV_KEY, input_device->evbit);
 	__set_bit(EV_ABS, input_device->evbit);
+	__set_bit(BTN_TOUCH, input_device->keybit);
 
 	input_set_abs_params(input_device, ABS_MT_POSITION_X,
 		0, x_max_value, 0, 0);

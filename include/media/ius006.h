@@ -1,9 +1,9 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
+/* 2012-07-20: File added and changed by Sony Corporation */
 /*
  * ius006.h - ius006 driver header
  *
  * Copyright (C) 2010 Motorola, Inc.
- * Copyright (C) 2010, 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -40,6 +40,7 @@
 #define IUS006_IOCTL_SET_VIDEO_MODE             _IOW('o', 13, __u32)
 
 #define IUS006_IOCTL_CANCEL_AUTOFOCUS           _IOW('o', 14, __u32)
+#define IUS006_IOCTL_SET_VIDEO_CHAT             _IOW('o', 15, __u32)
 
 #define MODE_MONITORING     0
 #define MODE_HALFRELEASE    1

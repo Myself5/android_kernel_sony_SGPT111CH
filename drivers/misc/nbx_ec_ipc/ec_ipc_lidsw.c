@@ -1,6 +1,5 @@
-/* 2011-06-10: File added by Sony Corporation */
 /*
- * Copyright (C) 2011 Sony Corporation
+ * Copyright (C) 2011,2012 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2, as
  * published by the Free Software Foundation.
@@ -12,46 +11,47 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/delay.h>
-#include <linux/platform_device.h>
 #include <linux/workqueue.h>
 #include <linux/list.h>
 #include <linux/err.h>
 #include <linux/semaphore.h>
+#include <linux/suspend.h>
+#include <linux/wakelock.h>
 
 #include <linux/nbx_ec_ipc.h>
 #include <linux/nbx_ec_ipc_lidsw.h>
 
 #define LOCKED_STATEMENT(mutex, statement)	\
-	if(0 == down_interruptible(mutex)) {	\
-		do {				\
-			statement;		\
-		} while(0);			\
-		up(mutex);			\
-	}
+	down(mutex);				\
+	do {					\
+		statement;			\
+	} while(0);				\
+	up(mutex);
 
 static LIST_HEAD(callback_list);
-static DECLARE_MUTEX(callback_list_mutex);
+static DEFINE_SEMAPHORE(callback_list_mutex);
 
 struct callback_t {
 	struct list_head list;
 	void (*func)(void);
 };
 
-static int ec_ipc_lidsw_last;
+static int ec_ipc_lidsw_last = -1; /* unknown */
 
 #define EC_IPC_CID_LID_REQUEST 0x30
 #define EC_IPC_CID_LID_EVENT 0x31
 
 static struct workqueue_struct* ec_ipc_lidsw_workqueue;
-static struct delayed_work ec_ipc_lidsw_work;
-#define FAIL_RETRY_LIMIT 3
-static int fail_retry_count = FAIL_RETRY_LIMIT;
+static struct work_struct ec_ipc_lidsw_work;
+
+static struct wake_lock ec_ipc_lidsw_wake_lock;
 
 static void ec_ipc_lidsw_worker(struct work_struct* work)
 {
@@ -71,18 +71,9 @@ static void ec_ipc_lidsw_worker(struct work_struct* work)
 				NULL, 0,
 				res_buf, sizeof(res_buf) );
 	if(ret < (int)sizeof(res_buf)){
-		if(0 < fail_retry_count--) {
-			pr_err("ec_ipc_lidsw:ec_ipc_send_request failed. %d ...retry\n", ret);
-			queue_delayed_work(ec_ipc_lidsw_workqueue, &ec_ipc_lidsw_work,
-					msecs_to_jiffies(1000));
-		}
-		else {
-			pr_err("ec_ipc_lidsw:ec_ipc_send_request failed. %d ...giveup\n", ret);
-			fail_retry_count = FAIL_RETRY_LIMIT;
-		}
-		return;
+		pr_err("ec_ipc_lidsw:ec_ipc_send_request failed. %d\n", ret);
+		goto err_exit;
 	}
-	fail_retry_count = FAIL_RETRY_LIMIT;
 
 	lidsw_state = (res_buf[LID_RES_RESULT] == LID_RES_RESULT_OPEN)? 0: 1;
 
@@ -97,6 +88,9 @@ static void ec_ipc_lidsw_worker(struct work_struct* work)
 				}
 			);
 	}
+
+err_exit:
+	wake_unlock(&ec_ipc_lidsw_wake_lock);
 }
 
 static void ec_ipc_lidsw_event(const uint8_t* buf, int size)
@@ -104,9 +98,7 @@ static void ec_ipc_lidsw_event(const uint8_t* buf, int size)
 	if(buf == NULL) return;
 	if(ec_ipc_lidsw_workqueue == NULL) return;
 
-	/* exec work, now */
-	cancel_delayed_work(&ec_ipc_lidsw_work);
-	queue_delayed_work(ec_ipc_lidsw_workqueue, &ec_ipc_lidsw_work, 0);
+	queue_work(ec_ipc_lidsw_workqueue, &ec_ipc_lidsw_work);
 }
 
 int nbx_ec_ipc_lidsw_get_state(void)
@@ -118,11 +110,10 @@ int nbx_ec_ipc_lidsw_register_callback( void (*func)(void) )
 {
 	struct callback_t* callback;
 
-	callback = kmalloc(sizeof(struct callback_t), GFP_KERNEL);
+	callback = kzalloc(sizeof(struct callback_t), GFP_KERNEL);
 	if(callback == NULL) {
 		return -ENOMEM;
 	}
-	memset(callback, 0, sizeof(struct callback_t));
 
 	callback->func = func;
 
@@ -149,7 +140,31 @@ void nbx_ec_ipc_lidsw_unregister_callback( void (*func)(void) )
 		);
 }
 
-static int ec_ipc_lidsw_probe(struct platform_device* pdev)
+#ifdef CONFIG_SUSPEND
+
+static int ec_ipc_lidsw_suspend(struct nbx_ec_ipc_device* edev)
+{
+	cancel_work_sync(&ec_ipc_lidsw_work);
+	ec_ipc_lidsw_last = -1; /* unknown */
+
+	return 0;
+}
+static int ec_ipc_lidsw_resume(struct nbx_ec_ipc_device* edev)
+{
+	if(ec_ipc_lidsw_workqueue != NULL) {
+		wake_lock_timeout(&ec_ipc_lidsw_wake_lock, 10 * HZ);
+		queue_work(ec_ipc_lidsw_workqueue, &ec_ipc_lidsw_work);
+	}
+
+	return 0;
+}
+
+#else /* !CONFIG_SUSPEND */
+#define ec_ipc_lidsw_suspend NULL
+#define ec_ipc_lidsw_resume NULL
+#endif /* CONFIG_SUSPEND */
+
+static int ec_ipc_lidsw_probe(struct nbx_ec_ipc_device* edev)
 {
 	int ret = 0;
 
@@ -160,11 +175,13 @@ static int ec_ipc_lidsw_probe(struct platform_device* pdev)
 		goto error_exit;
 	}
 
-	INIT_DELAYED_WORK(&ec_ipc_lidsw_work, ec_ipc_lidsw_worker);
+	INIT_WORK(&ec_ipc_lidsw_work, ec_ipc_lidsw_worker);
+
+	wake_lock_init(&ec_ipc_lidsw_wake_lock, WAKE_LOCK_SUSPEND, "ec_ipc_lidsw");
 
 	ec_ipc_lidsw_last = -1; /* unknown */
 	ec_ipc_register_recv_event(EC_IPC_CID_LID_EVENT, ec_ipc_lidsw_event);
-	queue_delayed_work(ec_ipc_lidsw_workqueue, &ec_ipc_lidsw_work, 0); /* 1st check */
+	queue_work(ec_ipc_lidsw_workqueue, &ec_ipc_lidsw_work); /* 1st check */
 
 	return 0;
 
@@ -179,7 +196,7 @@ error_exit:
 	return ret;
 }
 
-static int ec_ipc_lidsw_remove(struct platform_device* pdev)
+static int ec_ipc_lidsw_remove(struct nbx_ec_ipc_device* edev)
 {
 	struct callback_t* del_callback;
 	struct callback_t* n_callback;
@@ -194,51 +211,27 @@ static int ec_ipc_lidsw_remove(struct platform_device* pdev)
 		);
 
 	if(ec_ipc_lidsw_workqueue != NULL) {
-		cancel_delayed_work(&ec_ipc_lidsw_work);
+		cancel_work_sync(&ec_ipc_lidsw_work);
 		flush_workqueue(ec_ipc_lidsw_workqueue);
-		cancel_delayed_work(&ec_ipc_lidsw_work);
 		destroy_workqueue(ec_ipc_lidsw_workqueue);
 	}
 
 	ec_ipc_lidsw_workqueue = NULL;
 
-	return 0;
-}
-
-#ifdef CONFIG_PM
-static int ec_ipc_lidsw_suspend(struct platform_device* pdev, pm_message_t state)
-{
-	if(ec_ipc_lidsw_workqueue != NULL) {
-		cancel_delayed_work(&ec_ipc_lidsw_work);
-		flush_workqueue(ec_ipc_lidsw_workqueue);
-		cancel_delayed_work(&ec_ipc_lidsw_work);
-	}
+	wake_lock_destroy(&ec_ipc_lidsw_wake_lock);
 
 	return 0;
 }
-static int ec_ipc_lidsw_resume(struct platform_device* pdev)
-{
-	if(ec_ipc_lidsw_workqueue != NULL) {
-		queue_delayed_work(ec_ipc_lidsw_workqueue, &ec_ipc_lidsw_work, 0);
-	}
 
-	return 0;
-}
-#endif /* CONFIG_PM */
-
-static struct platform_driver ec_ipc_lidsw_driver = {
+static struct nbx_ec_ipc_driver ec_ipc_lidsw_driver = {
 	.probe   = ec_ipc_lidsw_probe,
 	.remove  = ec_ipc_lidsw_remove,
-#ifdef CONFIG_PM
 	.suspend = ec_ipc_lidsw_suspend,
 	.resume  = ec_ipc_lidsw_resume,
-#endif /* CONFIG_PM */
-	.driver  = {
+	.drv = {
 		.name = "ec_ipc_lidsw",
 	},
 };
-
-static struct platform_device* ec_ipc_lidsw_platform_dev;
 
 static int __init ec_ipc_lidsw_init(void)
 {
@@ -246,27 +239,17 @@ static int __init ec_ipc_lidsw_init(void)
 
 	ec_ipc_lidsw_workqueue = NULL;
 
-	ret = platform_driver_register(&ec_ipc_lidsw_driver);
+	ret = nbx_ec_ipc_driver_register(&ec_ipc_lidsw_driver);
 	if (ret < 0) {
-		return ret;
-	}
-
-	ec_ipc_lidsw_platform_dev =
-		platform_device_register_simple("ec_ipc_lidsw", 0, NULL, 0);
-	if (IS_ERR(ec_ipc_lidsw_platform_dev)) {
-		ret = PTR_ERR(ec_ipc_lidsw_platform_dev);
-		platform_driver_unregister(&ec_ipc_lidsw_driver);
+		pr_err("%s:nbx_ec_ipc_driver_register() failed, %d\n", __func__, ret);
 		return ret;
 	}
 
 	return 0;
-
-
 }
 static void  __exit ec_ipc_lidsw_exit(void)
 {
-	platform_device_unregister(ec_ipc_lidsw_platform_dev);
-	platform_driver_unregister(&ec_ipc_lidsw_driver);
+	nbx_ec_ipc_driver_unregister(&ec_ipc_lidsw_driver);
 }
 
 module_init(ec_ipc_lidsw_init);

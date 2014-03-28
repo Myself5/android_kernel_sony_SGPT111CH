@@ -1,4 +1,4 @@
-# 2011-06-10: File changed by Sony Corporation
+# 2012-07-20: File changed by Sony Corporation
 #
 # Input misc drivers configuration
 #
@@ -22,6 +22,16 @@ config INPUT_88PM860X_ONKEY
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called 88pm860x_onkey.
+
+config INPUT_AB8500_PONKEY
+	tristate "AB8500 Pon (PowerOn) Key"
+	depends on AB8500_CORE
+	help
+	  Say Y here to use the PowerOn Key for ST-Ericsson's AB8500
+	  Mix-Sig PMIC.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called ab8500-ponkey.
 
 config INPUT_AD714X
 	tristate "Analog Devices AD714x Capacitance Touch Sensor"
@@ -296,24 +306,6 @@ config INPUT_SGI_BTNS
 	  To compile this driver as a module, choose M here: the
 	  module will be called sgi_btns.
 
-config INPUT_WINBOND_CIR
-	tristate "Winbond IR remote control"
-	depends on X86 && PNP
-	select NEW_LEDS
-	select LEDS_CLASS
-	select LEDS_TRIGGERS
-	select BITREVERSE
-	help
-	  Say Y here if you want to use the IR remote functionality found
-	  in some Winbond SuperI/O chips. Currently only the WPCD376I
-	  chip is supported (included in some Intel Media series motherboards).
-
-	  IR Receive and wake-on-IR from suspend and power-off is currently
-	  supported.
-
-	  To compile this driver as a module, choose M here: the module will be
-	  called winbond_cir.
-
 config INPUT_GPIO
 	tristate "GPIO driver support"
 	help
@@ -455,6 +447,43 @@ config INPUT_ADXL34X_SPI
 	  To compile this driver as a module, choose M here: the
 	  module will be called adxl34x-spi.
 
+config INPUT_CMA3000
+	tristate "VTI CMA3000 Tri-axis accelerometer"
+	help
+	  Say Y here if you want to use VTI CMA3000_D0x Accelerometer
+	  driver
+
+	  This driver currently only supports I2C interface to the
+	  controller. Also select the I2C method.
+
+	  If unsure, say N
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called cma3000_d0x.
+
+config INPUT_CMA3000_I2C
+	tristate "Support I2C bus connection"
+	depends on INPUT_CMA3000 && I2C
+	help
+	  Say Y here if you want to use VTI CMA3000_D0x Accelerometer
+	  through I2C interface.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called cma3000_d0x_i2c.
+
+config INPUT_XEN_KBDDEV_FRONTEND
+	tristate "Xen virtual keyboard and mouse support"
+	depends on XEN_FBDEV_FRONTEND
+	default y
+	select XEN_XENBUS_FRONTEND
+	help
+	  This driver implements the front-end of the Xen virtual
+	  keyboard and mouse device driver.  It communicates with a back-end
+	  in another domain.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called xen-kbdfront.
+
 config INPUT_ALPS_GPIO_SCROLLWHEEL
 	tristate "Alps GPIO Scrollwheel"
 	depends on GENERIC_GPIO
@@ -471,7 +500,7 @@ config INPUT_ALPS_GPIO_SCROLLWHEEL
 	  To compile this driver as a module, choose M here: the
 	  module will be called alps_gpio_scrollwheel.
 
-config INPUT_NBX_ACCELEROMETER
+config INPUT_LIS331DLH
 	tristate "STMicroeletronics LIS331DH 3-axes digital accelerometer for NBX"
 	depends on ARCH_TEGRA
 	help
@@ -479,38 +508,7 @@ config INPUT_NBX_ACCELEROMETER
 	  STMicroelectoronics LIS331DLH.
 	  This driver will provide the measurements of acceleration in 3 axes.
 
-choice
-	prompt "Select sensor's axes setting"
-	depends on INPUT_NBX_ACCELEROMETER
-	optional
-config INPUT_NBX_ACC_AXES_XYZ
-	bool "no swap"
-config INPUT_NBX_ACC_AXES_XZY
-	bool "swap X-Y-Z for X-Z-Y"
-config INPUT_NBX_ACC_AXES_YZX
-	bool "swap X-Y-Z for Y-Z-X"
-config INPUT_NBX_ACC_AXES_YXZ
-	bool "swap X-Y-Z for Y-X-Z"
-config INPUT_NBX_ACC_AXES_ZXY
-	bool "swap X-Y-Z for Z-X-Y"
-config INPUT_NBX_ACC_AXES_ZYX
-	bool "swap X-Y-Z fro Z-Y-X"
-endchoice
-
-menu "Select sensor's axis directions"
-	depends on INPUT_NBX_ACCELEROMETER
-config INPUT_NBX_ACC_INVERSE_X_AXIS
-	bool "change X for -X"
-	default n
-config INPUT_NBX_ACC_INVERSE_Y_AXIS
-	bool "change Y for -Y"
-	default n
-config INPUT_NBX_ACC_INVERSE_Z_AXIS
-	bool "change Z for -Z"
-	default n
-endmenu
-
-config INPUT_NBX_MAGNETOMETER
+config INPUT_AMI304
 	tristate "AICHI STEEL AMI304 3-axes magnetometer for NBX"
 	depends on ARCH_TEGRA
 	help
@@ -519,37 +517,19 @@ config INPUT_NBX_MAGNETOMETER
 	  This driver will provide the measurements of
 	  ambient mangetic field in 3 axes.
 
-choice
-	prompt "Select sensor's axes setting"
-	depends on INPUT_NBX_MAGNETOMETER
-config INPUT_NBX_MAG_AXES_XYZ
-	bool "no swap"
-config INPUT_NBX_MAG_AXES_XZY
-	bool "swap X-Y-Z for X-Z-Y"
-config INPUT_NBX_MAG_AXES_YZX
-	bool "swap X-Y-Z for Y-Z-X"
-config INPUT_NBX_MAG_AXES_YXZ
-	bool "swap X-Y-Z for Y-X-Z"
-config INPUT_NBX_MAG_AXES_ZXY
-	bool "swap X-Y-Z for Z-X-Y"
-config INPUT_NBX_MAG_AXES_ZYX
-	bool "swap X-Y-Z fro Z-Y-X"
-endchoice
+config INPUT_AK8975C
+	tristate "Asahi Kasei AK8975C 3-axes magnetometer for NBX"
+	depends on ARCH_TEGRA
+	help
+	  If you say yes here you get support for magnetometer from
+	  Asahi Kasei AK8975C.
+	  This driver will provide the measurements of
+	  ambient mangetic field in 3 axes.
 
-menu "Select sensor's axes direction"
-	depends on INPUT_NBX_MAGNETOMETER
-config INPUT_NBX_MAG_INVERSE_X_AXIS
-	bool "change X for -X"
-	default n
-config INPUT_NBX_MAG_INVERSE_Y_AXIS
-	bool "change Y for -Y"
-	default n
-config INPUT_NBX_MAG_INVERSE_Z_AXIS
-	bool "change Z for -Z"
-	default n
-endmenu
+config NBX_L3G4200DH_HIGHSPEED
+	bool "Highspeed ODR support for L3G4200DH driver"
 
-config INPUT_NBX_GYROSCOPE
+config INPUT_L3G4200DH
 	tristate "STMicroeletronics L3G4200DH 3-axes digital gyroscope for NBX"
 	depends on ARCH_TEGRA
 	help
@@ -557,37 +537,7 @@ config INPUT_NBX_GYROSCOPE
 	  STMicroelectoronics gyroscope.
 	  This driver will provide the measurements of acceleration in 3 axes.
 
-choice
-	prompt "Select sensor's axes setting"
-	depends on INPUT_NBX_GYROSCOPE
-config INPUT_NBX_GYRO_AXES_XYZ
-	bool "no swap"
-config INPUT_NBX_GYRO_AXES_XZY
-	bool "swap X-Y-Z for X-Z-Y"
-config INPUT_NBX_GYRO_AXES_YZX
-	bool "swap X-Y-Z for Y-Z-X"
-config INPUT_NBX_GYRO_AXES_YXZ
-	bool "swap X-Y-Z for Y-X-Z"
-config INPUT_NBX_GYRO_AXES_ZXY
-	bool "swap X-Y-Z for Z-X-Y"
-config INPUT_NBX_GYRO_AXES_ZYX
-	bool "swap X-Y-Z fro Z-Y-X"
-endchoice
-
-menu "Select sensor's axes direction"
-	depends on INPUT_NBX_GYROSCOPE
-config INPUT_NBX_GYRO_INVERSE_X_AXIS
-	bool "change X for -X"
-	default n
-config INPUT_NBX_GYRO_INVERSE_Y_AXIS
-	bool "change Y for -Y"
-	default n
-config INPUT_NBX_GYRO_INVERSE_Z_AXIS
-	bool "change Z for -Z"
-	default n
-endmenu
-
-config INPUT_NBX_LIGHTSENSOR
+config INPUT_BH1690
 	tristate "Ambient light sensor for NBX"
 	depends on ARCH_TEGRA
 	help
@@ -599,5 +549,14 @@ config INPUT_NBX_EC_LID_SWITCH
 	depends on NBX_EC_IPC_LID_SWITCH
 	help
 	  This option enables support for NBX EC lid switch
+
+config INPUT_SX8636
+	tristate "Semtech SX8636 capacitive button touch controller"
+	depends on I2C
+	help
+	  This driver provides support for the sx8636 chip which is a 
+	  low power, capacitive button touch controller.
+
+	  Say Y here if you have a device containing sx8636 chip.
 
 endif

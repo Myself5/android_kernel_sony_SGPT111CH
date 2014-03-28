@@ -15,31 +15,11 @@
 #define WM8903_GPIO_NO_CONFIG 0x8000
 
 /*
- * WM8903_GPn_FN values
- *
- * See datasheets for list of valid values per pin
- */
-#define WM8903_GPn_FN_GPIO_OUTPUT			0
-#define WM8903_GPn_FN_GPIO_BCLK			1
-#define WM8903_GPn_FN_GPIO_IRQ_OUTPUT			1
-#define WM8903_GPn_FN_GPIO_INPUT			3
-#define WM8903_GPn_FN_GPIO_MICBIAS_CURRENT_DETECT	4
-#define WM8903_GPn_FN_GPIO_MICBIAS_SHORT_DETECT	5
-#define WM8903_GPn_FN_GPIO_DMIC_LR_CLK_OUTPUT		6
-#define WM8903_GPn_FN_GPIO_RESERVED			7
-#define WM8903_GPn_FN_GPIO_FLL_LOCK_OUTPUT		8
-#define WM8903_GPn_FN_GPIO_FFL_CLOCK_OUTPUT		9
-
-/*
  * R6 (0x06) - Mic Bias Control 0
  */
-#define WM8903_MICDET_HYST_ENA                  0x0080  /* MICDET_HYST_ENA */
-#define WM8903_MICDET_HYST_ENA_MASK             0x0080  /* MICDET_HYST_ENA */
-#define WM8903_MICDET_HYST_ENA_SHIFT                 7  /* MICDET_HYST_ENA */
-#define WM8903_MICDET_HYST_ENA_WIDTH                 1  /* MICDET_HYST_ENA */
-#define WM8903_MICDET_THR_MASK                  0x0070  /* MICDET_THR - [6:4] */
-#define WM8903_MICDET_THR_SHIFT                      4  /* MICDET_THR - [6:4] */
-#define WM8903_MICDET_THR_WIDTH                      3  /* MICDET_THR - [6:4] */
+#define WM8903_MICDET_THR_MASK                  0x0030  /* MICDET_THR - [5:4] */
+#define WM8903_MICDET_THR_SHIFT                      4  /* MICDET_THR - [5:4] */
+#define WM8903_MICDET_THR_WIDTH                      2  /* MICDET_THR - [5:4] */
 #define WM8903_MICSHORT_THR_MASK                0x000C  /* MICSHORT_THR - [3:2] */
 #define WM8903_MICSHORT_THR_SHIFT                    2  /* MICSHORT_THR - [3:2] */
 #define WM8903_MICSHORT_THR_WIDTH                    2  /* MICSHORT_THR - [3:2] */
@@ -51,6 +31,21 @@
 #define WM8903_MICBIAS_ENA_MASK                 0x0001  /* MICBIAS_ENA */
 #define WM8903_MICBIAS_ENA_SHIFT                     0  /* MICBIAS_ENA */
 #define WM8903_MICBIAS_ENA_WIDTH                     1  /* MICBIAS_ENA */
+
+/*
+ * WM8903_GPn_FN values
+ *
+ * See datasheets for list of valid values per pin
+ */
+#define WM8903_GPn_FN_GPIO_OUTPUT                    0
+#define WM8903_GPn_FN_BCLK                           1
+#define WM8903_GPn_FN_IRQ_OUTPT                      2
+#define WM8903_GPn_FN_GPIO_INPUT                     3
+#define WM8903_GPn_FN_MICBIAS_CURRENT_DETECT         4
+#define WM8903_GPn_FN_MICBIAS_SHORT_DETECT           5
+#define WM8903_GPn_FN_DMIC_LR_CLK_OUTPUT             6
+#define WM8903_GPn_FN_FLL_LOCK_OUTPUT                8
+#define WM8903_GPn_FN_FLL_CLOCK_OUTPUT               9
 
 /*
  * R116 (0x74) - GPIO Control 1
@@ -247,7 +242,6 @@
 #define WM8903_GP5_DB_SHIFT                          0  /* GP5_DB */
 #define WM8903_GP5_DB_WIDTH                          1  /* GP5_DB */
 
-/* the number of gpio pins */
 #define WM8903_NUM_GPIO 5
 
 struct wm8903_platform_data {
@@ -263,7 +257,6 @@ struct wm8903_platform_data {
 	int micdet_delay;      /* Delay after microphone detection (ms) */
 
 	int gpio_base;
-
 	u32 gpio_cfg[WM8903_NUM_GPIO]; /* Default register values for GPIO pin mux */
 };
 

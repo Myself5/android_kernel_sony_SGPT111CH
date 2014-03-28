@@ -84,8 +84,10 @@ static ssize_t akm8975_store(struct device *dev, struct device_attribute *attr,
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	unsigned long val;
-	strict_strtoul(buf, 10, &val);
-	if (val > 0xff)
+	int err;
+
+	err = strict_strtoul(buf, 10, &val);
+	if (err || val > 0xff)
 		return -EINVAL;
 	i2c_smbus_write_byte_data(client, AK8975_REG_CNTL, val);
 	return count;
@@ -222,8 +224,8 @@ static int akm_aot_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static long akm_aot_ioctl(struct file *file,
-			  unsigned int cmd, unsigned long arg)
+static long akm_aot_ioctl(struct file *f, struct file *file,
+	      unsigned int cmd, unsigned long arg)
 {
 	void __user *argp = (void __user *) arg;
 	short flag;
@@ -316,8 +318,8 @@ static int akmd_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static long akmd_ioctl(struct file *file, unsigned int cmd,
-		       unsigned long arg)
+static long akmd_ioctl(struct file *f, struct file *file, unsigned int cmd,
+		      unsigned long arg)
 {
 	void __user *argp = (void __user *) arg;
 

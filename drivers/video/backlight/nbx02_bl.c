@@ -1,4 +1,3 @@
-/* 2011-06-10: File added and changed by Sony Corporation */
 /*
  * Copyright (C) 2011 Sony Corporation
  * This program is free software; you can redistribute it and/or modify
@@ -23,9 +22,9 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/miscdevice.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/fb.h>
@@ -35,13 +34,7 @@
 #include <linux/pwm_backlight.h>
 #include <linux/nbx02_backlight.h>
 #include <linux/slab.h>
-
-struct off_keep_info {
-	int index;
-	struct backlight_device *bd;
-};
-
-static struct off_keep_info ok_info[2];
+#include <linux/uaccess.h>
 
 struct nbx02_bl_data {
 	struct {
@@ -60,7 +53,10 @@ struct nbx02_bl_data {
 	unsigned int		period;
 	int			(*notify)(struct device *,
 					  int brightness);
+	struct miscdevice miscdev;
 };
+
+static struct backlight_device *bl_dev;
 
 /*
 ** conversion table
@@ -99,7 +95,6 @@ static int nbx02_backlight_update_status(struct backlight_device *bl)
 {
 	struct nbx02_bl_data *pb = dev_get_drvdata(&bl->dev);
 	int brightness = bl->props.brightness;
-	int max = bl->props.max_brightness;
 	int index;
 	int duty;
 
@@ -159,45 +154,34 @@ static const struct backlight_ops nbx02_backlight_ops = {
 	.get_brightness	= nbx02_backlight_get_brightness,
 };
 
-static ssize_t nbx02_backlight_show_expire_time(struct device *dev,
-		struct device_attribute *attr,char *buf)
+static int store_expire_time(unsigned long expire_time)
 {
-	struct nbx02_bl_data *pb = dev_get_drvdata(dev);
+	struct nbx02_bl_data *pb = bl_dev ? dev_get_drvdata(&bl_dev->dev) : 0;
+	int rc = 0;
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", pb->expire_time);
-}
+	if ( !pb )
+		return -EFAULT;
 
-static ssize_t nbx02_backlight_store_expire_time(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
-{
-	int rc;
-	struct backlight_device *bd = to_backlight_device(dev);
-	struct nbx02_bl_data *pb = dev_get_drvdata(dev);
-	unsigned long expire_time;
-
-	rc = strict_strtoul(buf, 0, &expire_time);
-	if (rc)
-		return rc;
-
-	rc = -ENXIO;
-	mutex_lock(&bd->ops_lock);
-	if (bd->ops) {
+	mutex_lock(&bl_dev->ops_lock);
+	if (bl_dev->ops) {
 		if ((expire_time != 0) && (expire_time < 50 || expire_time > INT_MAX))
 			rc = -EINVAL;
 		else {
 			pr_debug("nbx02_backlight: set expire time to %lu\n", expire_time);
 			pb->expire_time = expire_time;
 		}
-		rc = count;
 	}
-	mutex_unlock(&bd->ops_lock);
+	else {
+		rc = -ENXIO;
+	}
+	mutex_unlock(&bl_dev->ops_lock);
 
 	return rc;
 }
 
-void off_keep_timer_stop(struct backlight_device *bd)
+void off_keep_timer_stop(struct backlight_device *bl)
 {
-	struct nbx02_bl_data *pb = dev_get_drvdata(&bd->dev);
+	struct nbx02_bl_data *pb = dev_get_drvdata(&bl->dev);
 	int index;
 
 	for (index = 0; index < 2; index++) {
@@ -205,49 +189,40 @@ void off_keep_timer_stop(struct backlight_device *bd)
 			pr_debug("nbx02_backlight: off keep timer stop(%d)", index);
 			del_timer_sync(&pb->panel[index].timer);
 			pb->panel[index].off_keeper = 1;
-			backlight_update_status(bd);
+			backlight_update_status(bl);
 			pb->panel[index].flags &= ~BL_FLAGS_KEEP_TIMER;
 		}
 	}
 }
 
-static void off_keep_timer_handler(unsigned long *info_addr)
+static void off_keep_timer_handler(unsigned long info_addr)
 {
-	struct off_keep_info *info = (struct off_keep_info *)info_addr;
-	struct nbx02_bl_data *pb = dev_get_drvdata(&info->bd->dev);
+	struct nbx02_bl_data *pb = bl_dev ? dev_get_drvdata(&bl_dev->dev) : 0;
+	int index = (int)info_addr;
 
-	if (pb->panel[info->index].flags & BL_FLAGS_KEEP_TIMER) {
-		pr_debug("nbx02_backlight: off keep timeup(%d)", info->index);
-		pb->panel[info->index].off_keeper = 1;
-		backlight_update_status(info->bd);
-		pb->panel[info->index].flags &= ~BL_FLAGS_KEEP_TIMER;
+	if ( !pb ) 
+		return;
+
+	if (pb->panel[index].flags & BL_FLAGS_KEEP_TIMER) {
+		pr_debug("nbx02_backlight: off keep timeup(%d)", index);
+		pb->panel[index].off_keeper = 1;
+		backlight_update_status(bl_dev);
+		pb->panel[index].flags &= ~BL_FLAGS_KEEP_TIMER;
 	}
 }
 
-static ssize_t nbx02_backlight_show_off_keeper(struct device *dev,
-		struct device_attribute *attr,char *buf,int index)
+static ssize_t nbx02_backlight_store_off_keeper(unsigned long off_keeper,
+		int index)
 {
-	struct nbx02_bl_data *pb = dev_get_drvdata(dev);
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", pb->panel[index].off_keeper);
-}
-
-static ssize_t nbx02_backlight_store_off_keeper(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count,int index)
-{
-	int rc;
-	struct backlight_device *bd = to_backlight_device(dev);
-	struct nbx02_bl_data *pb = dev_get_drvdata(dev);
-	unsigned long off_keeper;
+	struct nbx02_bl_data *pb = bl_dev ? dev_get_drvdata(&bl_dev->dev) : 0;
+	int rc = 0;
 	unsigned long timeout;
 
-	rc = strict_strtoul(buf, 0, &off_keeper);
-	if (rc)
-		return rc;
+	if ( !pb )
+		return -EFAULT;
 
-	rc = -ENXIO;
-	mutex_lock(&bd->ops_lock);
-	if (bd->ops) {
+	mutex_lock(&bl_dev->ops_lock);
+	if (bl_dev->ops) {
 		pr_debug("nbx02_backlight: set off keeper%d to %lu\n", index, off_keeper);
 		if (pb->panel[index].off_keeper != off_keeper) {
 			if (off_keeper) {
@@ -259,13 +234,12 @@ static ssize_t nbx02_backlight_store_off_keeper(struct device *dev,
 			}
 			else if (pb->expire_time != 0) {
 				if (!(pb->panel[index].flags & BL_FLAGS_KEEP_TIMER)) {
-					ok_info[index].bd = bd;
 
 					init_timer(&pb->panel[index].timer);
 					timeout = pb->expire_time / (1000 / HZ);
 					pb->panel[index].timer.function = off_keep_timer_handler;
 					pb->panel[index].timer.expires = jiffies + timeout;
-					pb->panel[index].timer.data = (unsigned long)&ok_info[index];
+					pb->panel[index].timer.data = (unsigned long)index;
 					pr_debug("nbx02_backlight: off keep timer start(%d)=%lu",
 									 index, timeout);
 					add_timer(&pb->panel[index].timer);
@@ -273,12 +247,11 @@ static ssize_t nbx02_backlight_store_off_keeper(struct device *dev,
 				}
 			}
 			pb->panel[index].off_keeper = off_keeper;
-			backlight_update_status(bd);
+			backlight_update_status(bl_dev);
 		}
 		else if (!off_keeper) {
 			if (pb->expire_time != 0) {
 				if (pb->panel[index].flags & BL_FLAGS_KEEP_TIMER) {
-					ok_info[index].bd = bd;
 
 					timeout = pb->expire_time / (1000 / HZ);
 					pr_debug("nbx02_backlight: off keep timer restart(%d)=%lu",
@@ -291,55 +264,116 @@ static ssize_t nbx02_backlight_store_off_keeper(struct device *dev,
 				del_timer_sync(&pb->panel[index].timer);
 			}
 			pb->panel[index].off_keeper = off_keeper;
-			backlight_update_status(bd);
+			backlight_update_status(bl_dev);
 		}
-		rc = count;
 	}
-	mutex_unlock(&bd->ops_lock);
+	else {
+		rc = -ENXIO;
+	}
+	mutex_unlock(&bl_dev->ops_lock);
 
 	return rc;
 }
 
-static ssize_t nbx02_backlight_show_off_keeper0(struct device *dev,
-		struct device_attribute *attr,char *buf)
+static int nbx02_backlight_open(struct inode *inode, struct file *filp)
 {
-	return nbx02_backlight_show_off_keeper(dev, attr, buf, 0);
+	struct nbx02_bl_data *pb = bl_dev ? dev_get_drvdata(&bl_dev->dev) : 0;
+	filp->private_data = pb;
+	if ( pb ) {
+		pr_debug("open(%s)", dev_name(pb->dev));
+	}
+	return 0;
 }
 
-static ssize_t nbx02_backlight_store_off_keeper0(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
+static int nbx02_backlight_release(struct inode *inode, struct file *filp)
 {
-	return nbx02_backlight_store_off_keeper(dev, attr, buf, count, 0);
+	struct nbx02_bl_data *pb = bl_dev ? dev_get_drvdata(&bl_dev->dev) : 0;
+	if ( pb ) {
+		pr_debug("release(%s)", dev_name(pb->dev));
+	}
+	return 0;
 }
 
-static ssize_t nbx02_backlight_show_off_keeper1(struct device *dev,
-		struct device_attribute *attr,char *buf)
+static long nbx02_backlight_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-	return nbx02_backlight_show_off_keeper(dev, attr, buf, 1);
+	//struct nbx02_bl_data *pb = bl_dev ? dev_get_drvdata(&bl_dev->dev) : 0;
+	struct nbx02_bl_data *pb = (struct nbx02_bl_data*)(filp->private_data);
+	int err = 0;
+	int32_t data1;
+	nbx_ioc_light data2;
+	void __user *uarg = (void __user *)arg;
+
+	if ( !pb )
+		return -EFAULT;
+
+	if (_IOC_TYPE(cmd) != NBX_BACKLIGHT_IOC_MAGIC)
+		return -ENOTTY;
+
+	if (_IOC_NR(cmd) > NBX_BACKLIGHT_IOC_MAXNR)
+		return -ENOTTY;
+
+	if (_IOC_DIR(cmd) & _IOC_READ)
+		err = !access_ok(VERIFY_WRITE, uarg, _IOC_SIZE(cmd));
+	if (_IOC_DIR(cmd) & _IOC_WRITE)
+		err = !access_ok(VERIFY_READ, uarg, _IOC_SIZE(cmd));
+
+	if (err)
+		return -EFAULT;
+
+	switch (cmd) {
+	case NBX_BACKLIGHT_IOC_SET_EXPIRE_TIME_MS:
+		if (copy_from_user(&data1, uarg, sizeof(data1)))
+			return -EFAULT;
+
+		pr_debug("ioctl(%s,NBX_BACKLIGHT_IOC_SET_EXPIRE_TIME_MS,%d)",
+						 dev_name(pb->dev), data1);
+		err = store_expire_time((unsigned long)data1);
+		break;
+
+	case NBX_BACKLIGHT_IOC_GET_EXPIRE_TIME_MS:
+		data1 = (int)pb->expire_time;
+		if (copy_to_user(uarg, &data1, sizeof(data1)))
+			return -EFAULT;
+
+		pr_debug("ioctl(%s,NBX_BACKLIGHT_IOC_GET_EXPIRE_TIME_MS)=%d",
+						 dev_name(pb->dev), data1);
+		break;
+
+	case NBX_BACKLIGHT_IOC_SET_LIGHT:
+		if (copy_from_user(data2, uarg, sizeof(data2)))
+			return -EFAULT;
+
+		pr_debug("ioctl(%s,NBX_BACKLIGHT_IOC_SET_LIGHT,%d,%d)",
+						 dev_name(pb->dev), data2[0], data2[1]);
+		err = nbx02_backlight_store_off_keeper((unsigned long)data2[1], data2[0]);
+		break;
+
+	case NBX_BACKLIGHT_IOC_GET_LIGHT:
+		if (copy_from_user(data2, uarg, sizeof(data2)))
+			return -EFAULT;
+
+		if ((data2[0] < 0) || (data2[0] > 1))
+			return -EINVAL;
+
+		data2[1] = pb->panel[data2[0]].off_keeper;
+		if (copy_to_user(uarg, data2, sizeof(data2)))
+			return -EFAULT;
+
+		pr_debug("ioctl(%s,NBX_BACKLIGHT_IOC_GET_LIGHT,%d)=%d",
+						 dev_name(pb->dev), data2[0], data2[1]);
+		break;
+
+	default:
+		return -ENOTTY;
+	}
+	return err;
 }
 
-static ssize_t nbx02_backlight_store_off_keeper1(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t count)
-{
-	return nbx02_backlight_store_off_keeper(dev, attr, buf, count, 1);
-}
-
-static DEVICE_ATTR(expire_time_ms, 0644, nbx02_backlight_show_expire_time,
-									 nbx02_backlight_store_expire_time);
-static DEVICE_ATTR(0, 0644, nbx02_backlight_show_off_keeper0,
-									 nbx02_backlight_store_off_keeper0);
-static DEVICE_ATTR(1, 0644, nbx02_backlight_show_off_keeper1,
-									 nbx02_backlight_store_off_keeper1);
-
-static struct attribute *nbx02_bl_attributes[] = {
-	&dev_attr_expire_time_ms.attr,
-	&dev_attr_0.attr,
-	&dev_attr_1.attr,
-	NULL
-};
-
-static const struct attribute_group nbx02_bl_attr_group = {
-	.attrs = nbx02_bl_attributes,
+static const struct file_operations nbx02_backlight_fops = {
+	.owner		= THIS_MODULE,
+	.open		= nbx02_backlight_open,
+	.release	= nbx02_backlight_release,
+	.unlocked_ioctl	= nbx02_backlight_ioctl
 };
 
 static int nbx02_backlight_probe(struct platform_device *pdev)
@@ -389,7 +423,8 @@ static int nbx02_backlight_probe(struct platform_device *pdev)
 	} else
 		dev_dbg(&pdev->dev, "got nbx02 for lower backlight\n");
 
-	memset(&props, 0, sizeof(struct backlight_properties));
+	memset(&props, 0, sizeof(props));
+	props.type = BACKLIGHT_PLATFORM;
 	props.max_brightness = data->pwm[0].max_brightness;
 	bl = backlight_device_register(dev_name(&pdev->dev), &pdev->dev, pb,
 				       &nbx02_backlight_ops, &props);
@@ -399,12 +434,19 @@ static int nbx02_backlight_probe(struct platform_device *pdev)
 		goto err_bl;
 	}
 
-	ret = sysfs_create_group(&bl->dev.kobj, &nbx02_bl_attr_group);
+	pb->miscdev.minor = MISC_DYNAMIC_MINOR;
+	pb->miscdev.name = "nbx_backlight";
+	pb->miscdev.fops = &nbx02_backlight_fops;
+
+	ret = misc_register(&pb->miscdev);
+	if (ret) {
+		dev_err(&pdev->dev, "unable to register miscdevice %s\n", pb->miscdev.name);
+		goto err_misc;
+	}
 
 	bl->props.brightness = data->pwm[0].dft_brightness;
 
 	for (index = 0; index < 2; index++) {
-		ok_info[index].index = index;
 		pb->panel[index].off_keeper = 1;
 		pb->panel[index].flags = 0;
 		pb->panel[index].duty = 0;
@@ -414,8 +456,13 @@ static int nbx02_backlight_probe(struct platform_device *pdev)
 	nbx02_backlight_update_status(bl);
 
 	platform_set_drvdata(pdev, bl);
+
+	bl_dev = bl;
+
 	return 0;
 
+err_misc:
+	backlight_device_unregister(bl);
 err_bl:
 	pwm_free(pb->panel[1].pwm);
 err_pwm1:
@@ -435,7 +482,11 @@ static int nbx02_backlight_remove(struct platform_device *pdev)
 	struct nbx02_bl_data *pb = dev_get_drvdata(&bl->dev);
 	int index;
 
-	sysfs_remove_group(&bl->dev.kobj, &nbx02_bl_attr_group);
+	off_keep_timer_stop(bl);
+
+	bl_dev = NULL;
+
+	misc_deregister(&pb->miscdev);
 
 	backlight_device_unregister(bl);
 	for (index = 0; index < 2; index++) {

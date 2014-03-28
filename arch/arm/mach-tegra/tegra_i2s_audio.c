@@ -733,7 +733,8 @@ static int setup_dma(struct audio_driver_state *ads, int mask)
 			ads->out.dma_req[i].source_addr = ads->out.buf_phy[i];
 		}
 		ads->out.dma_chan = tegra_dma_allocate_channel(
-				TEGRA_DMA_MODE_CONTINUOUS_SINGLE);
+				TEGRA_DMA_MODE_CONTINUOUS_SINGLE,
+				"i2s_tx_req_%d", ads->dma_req_sel);
 		if (!ads->out.dma_chan) {
 			pr_err("%s: error alloc output DMA channel: %ld\n",
 				__func__, PTR_ERR(ads->out.dma_chan));
@@ -754,7 +755,8 @@ static int setup_dma(struct audio_driver_state *ads, int mask)
 			ads->in.dma_req[i].dest_addr = ads->in.buf_phy[i];
 		}
 		ads->in.dma_chan = tegra_dma_allocate_channel(
-				TEGRA_DMA_MODE_CONTINUOUS_SINGLE);
+				TEGRA_DMA_MODE_CONTINUOUS_SINGLE,
+				"i2s_rx_req_%d", ads->dma_req_sel);
 		if (!ads->in.dma_chan) {
 			pr_err("%s: error allocating input DMA channel: %ld\n",
 				__func__, PTR_ERR(ads->in.dma_chan));
@@ -1929,7 +1931,7 @@ static int tegra_audio_probe(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
+#ifdef CONFIG_PM_SLEEP
 static int tegra_audio_suspend(struct platform_device *pdev, pm_message_t mesg)
 {
 	/* dev_info(&pdev->dev, "%s\n", __func__); */
@@ -1940,15 +1942,15 @@ static int tegra_audio_resume(struct platform_device *pdev)
 {
 	return i2s_configure(pdev);
 }
-#endif /* CONFIG_PM */
+#endif /* CONFIG_PM_SLEEP */
 
 static struct platform_driver tegra_audio_driver = {
 	.driver = {
-		.name = "i2s",
+		.name = "tegra-i2s",
 		.owner = THIS_MODULE,
 	},
 	.probe = tegra_audio_probe,
-#ifdef CONFIG_PM
+#ifdef CONFIG_PM_SLEEP
 	.suspend = tegra_audio_suspend,
 	.resume = tegra_audio_resume,
 #endif
